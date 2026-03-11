@@ -212,9 +212,6 @@ export async function installSkillsFromRepo(
   try {
     logger.info({ repo }, 'Installing skills via npx skills add');
 
-    // Run npx skills add in a temp directory with --all (non-interactive,
-    // all skills, all agents) and --copy (portable files, not symlinks).
-    // The --agent claude-code flag targets the Claude Code skills directory.
     // Build env: forward GITHUB_TOKEN so npx skills add can clone private repos
     const childEnv: Record<string, string> = {
       ...(process.env as Record<string, string>),

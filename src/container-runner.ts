@@ -247,9 +247,55 @@ function collectMcpEnvVars(): string[] {
 }
 
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
+ * Env var prefixes that should NOT be forwarded to agents.
+ * These are Railway internals, system vars, or security-sensitive vars.
+ */
+const BLOCKED_ENV_PREFIXES = [
+  'RAILWAY_',
+  'PATH',
+  'HOME',
+  'USER',
+  'SHELL',
+  'LANG',
+  'TERM',
+  'NODE_',
+  'npm_',
+  'NVM_',
+  'HOSTNAME',
+  'PWD',
+  'OLDPWD',
+  'SHLVL',
+  'LC_',
+  'XDG_',
+  'NIXPACKS_',
+  'AGENT_RUNNER_',
+  'NANOCLAW_',
+];
+
+/**
+ * Collect all custom env vars from process.env that aren't system/Railway internals.
+ * This ensures env vars set in Railway service config are automatically forwarded.
+ */
+function collectCustomEnvVars(): string[] {
+  const keys: string[] = [];
+  for (const key of Object.keys(process.env)) {
+    if (BLOCKED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix) || key === prefix)) continue;
+    // Skip empty values
+    if (!process.env[key]) continue;
+    keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Read secrets from .env and process.env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
- * Includes env vars required by MCP servers from .mcp.json.
+ *
+ * Forwards:
+ * - Core auth keys (Anthropic, Claude OAuth)
+ * - Env vars referenced in .mcp.json
+ * - Env vars declared in skill SKILL.md inputs
+ * - All custom env vars from Railway service config (non-system vars)
  */
 export function readSecrets(): Record<string, string> {
   const coreKeys = [
@@ -257,11 +303,13 @@ export function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'GITHUB_TOKEN',
   ];
   const mcpEnvKeys = collectMcpEnvVars();
   const skillEnvKeys = collectSkillEnvVars();
   const persistentMcpEnvKeys = collectPersistentMcpEnvVars();
-  const allKeys = [...coreKeys, ...mcpEnvKeys, ...skillEnvKeys, ...persistentMcpEnvKeys];
+  const customEnvKeys = IS_RAILWAY ? collectCustomEnvVars() : [];
+  const allKeys = [...new Set([...coreKeys, ...mcpEnvKeys, ...skillEnvKeys, ...persistentMcpEnvKeys, ...customEnvKeys])];
 
   const fromFile = readEnvFile(allKeys);
   // Fallback to process.env for Railway (secrets set as env vars, no .env file)

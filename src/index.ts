@@ -528,7 +528,7 @@ async function main(): Promise<void> {
     if (!channel) {
       logger.warn(
         { channel: channelName },
-        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
+        'Channel installed but credentials missing — skipping. Set env vars in Railway service config (or .env locally).',
       );
       continue;
     }

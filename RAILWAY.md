@@ -153,7 +153,7 @@ The agent calls the `install_skills` MCP tool, which runs `npx skills add` behin
 
 ### Required credentials
 
-Some skills declare required environment variables (API keys, endpoints) in their `SKILL.md` frontmatter under `inputs`. After installing, the agent will ask you for any missing credentials and store them using `set_env_var`. Values are written to `/data/.env` on the persistent volume, so they survive deploys.
+Some skills declare required environment variables (API keys, endpoints) in their `SKILL.md` frontmatter under `inputs`. After installing, the agent will list any missing credentials and ask you to add them in the **Railway service dashboard** (Environment Variables section). Once added, redeploy the service for them to take effect. All env vars set in Railway service config are automatically forwarded to agents — no `.env` file needed.
 
 ### Auto-update on deploy
 

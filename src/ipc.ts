@@ -6,7 +6,6 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { appendEnvVar } from './env.js';
 import { isValidGroupFolder, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -186,9 +185,6 @@ export async function processTaskIpc(
     // For install_skills
     repo?: string;
     requestId?: string;
-    // For set_env_var
-    key?: string;
-    value?: string;
     // For add_mcp_server
     command?: string;
     args?: string[];
@@ -619,35 +615,6 @@ export async function processTaskIpc(
         }
       } else if (!isMain) {
         logger.warn({ sourceGroup }, 'Unauthorized list_mcp_servers attempt blocked');
-      }
-      break;
-
-    case 'set_env_var':
-      if (isMain && data.key && data.value) {
-        // Validate key is safe (alphanumeric + underscore only)
-        if (!/^[A-Z][A-Z0-9_]*$/.test(data.key)) {
-          logger.warn(
-            { key: data.key, sourceGroup },
-            'Invalid env var name in set_env_var',
-          );
-          break;
-        }
-        try {
-          appendEnvVar(data.key, data.value);
-          // Also set in process.env for immediate use
-          process.env[data.key] = data.value;
-          logger.info(
-            { key: data.key, sourceGroup },
-            'Environment variable set via IPC',
-          );
-        } catch (err) {
-          logger.error({ key: data.key, err }, 'Failed to set env var via IPC');
-        }
-      } else if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized set_env_var attempt blocked',
-        );
       }
       break;
 

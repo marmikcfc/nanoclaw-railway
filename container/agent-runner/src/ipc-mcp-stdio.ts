@@ -351,7 +351,11 @@ server.tool(
               for (const input of result.requiredInputs) {
                 response += `\n- ${input.envVar}: ${input.description}${input.required ? ' (required)' : ' (optional)'}`;
               }
-              response += '\n\nUse the set_env_var tool to set each required credential.';
+              if (process.env.RAILWAY_ENVIRONMENT) {
+                response += '\n\nAsk the user to add these credentials in the Railway service dashboard (Environment Variables section) and redeploy.';
+              } else {
+                response += '\n\nUse the set_env_var tool to set each required credential.';
+              }
             }
 
             return { content: [{ type: 'text' as const, text: response }] };
@@ -478,7 +482,7 @@ server.tool(
 
 server.tool(
   'manage_mcp_servers',
-  'Manage MCP (Model Context Protocol) servers. Actions: "add" registers a new MCP server, "remove" removes a server by name, "list" shows all registered servers. Servers persist across restarts. For "add": provide EITHER a "url" (for remote HTTP/SSE servers — automatically bridged via mcp-remote) OR "command" + "args" (for stdio servers). After adding, use set_env_var to set any required credentials.',
+  `Manage MCP (Model Context Protocol) servers. Actions: "add" registers a new MCP server, "remove" removes a server by name, "list" shows all registered servers. Servers persist across restarts. For "add": provide EITHER a "url" (for remote HTTP/SSE servers — automatically bridged via mcp-remote) OR "command" + "args" (for stdio servers). After adding, ${process.env.RAILWAY_ENVIRONMENT ? 'ask the user to add required credentials in the Railway service dashboard and redeploy' : 'use set_env_var to set any required credentials'}.`,
   {
     action: z.enum(['add', 'remove', 'list']).describe('Action to perform'),
     name: z.string().optional().describe('Server name — required for "add" and "remove"'),
@@ -554,7 +558,11 @@ server.tool(
             let response = `MCP server "${args.name}" added successfully.`;
             if (result.envVarsNeeded && result.envVarsNeeded.length > 0) {
               response += `\n\nRequired environment variables: ${result.envVarsNeeded.join(', ')}`;
-              response += '\n\nUse the set_env_var tool to set each required credential.';
+              if (process.env.RAILWAY_ENVIRONMENT) {
+                response += '\n\nAsk the user to add these credentials in the Railway service dashboard (Environment Variables section) and redeploy.';
+              } else {
+                response += '\n\nUse the set_env_var tool to set each required credential.';
+              }
             }
             response += '\n\nNote: The server will be available on the next agent invocation.';
 
@@ -679,43 +687,6 @@ server.tool(
     return {
       content: [{ type: 'text' as const, text: 'Timed out waiting for MCP server list.' }],
       isError: true,
-    };
-  },
-);
-
-server.tool(
-  'set_env_var',
-  'Set an environment variable for the bot (persists across restarts). Use this to store credentials needed by skills. Main group only.',
-  {
-    key: z.string().describe('Environment variable name (e.g. OUTBOUND_TOOLS_URL)'),
-    value: z.string().describe('The value to set'),
-  },
-  async (args) => {
-    if (!isMain) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only the main group can set environment variables.' }],
-        isError: true,
-      };
-    }
-
-    // Validate key is safe (alphanumeric + underscore only)
-    if (!/^[A-Z][A-Z0-9_]*$/.test(args.key)) {
-      return {
-        content: [{ type: 'text' as const, text: `Invalid env var name "${args.key}". Must be uppercase alphanumeric with underscores (e.g. MY_API_KEY).` }],
-        isError: true,
-      };
-    }
-
-    writeIpcFile(TASKS_DIR, {
-      type: 'set_env_var',
-      key: args.key,
-      value: args.value,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    });
-
-    return {
-      content: [{ type: 'text' as const, text: `Environment variable ${args.key} set. It will be available to agents on next invocation.` }],
     };
   },
 );
