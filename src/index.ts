@@ -613,6 +613,56 @@ async function main(): Promise<void> {
         return;
       }
 
+      // Auto-register unregistered chats on first message.
+      // If no main group exists, the first chat becomes main (no trigger needed).
+      // Otherwise, register as a normal chat (trigger required).
+      if (!registeredGroups[chatJid]) {
+        let prefix: string | undefined;
+        if (chatJid.startsWith('slack:')) prefix = 'slack';
+        else if (chatJid.startsWith('tg:')) prefix = 'tg';
+        else if (chatJid.startsWith('dc:')) prefix = 'dc';
+        else if (chatJid.includes('@g.us') || chatJid.includes('@s.whatsapp.net'))
+          prefix = 'wa';
+
+        if (prefix) {
+          const hasMain = Object.values(registeredGroups).some(
+            (g) => g.isMain === true,
+          );
+          const chatName = msg.sender_name || chatJid;
+          const safeName = chatName
+            .replace(/[^a-zA-Z0-9-]/g, '-')
+            .toLowerCase()
+            .slice(0, 50);
+
+          if (!hasMain) {
+            registerGroup(chatJid, {
+              name: chatName,
+              folder: 'main',
+              trigger: `@${ASSISTANT_NAME}`,
+              added_at: new Date().toISOString(),
+              isMain: true,
+              requiresTrigger: false,
+            });
+            logger.info(
+              { jid: chatJid, name: chatName },
+              'Auto-registered first chat as main',
+            );
+          } else {
+            registerGroup(chatJid, {
+              name: chatName,
+              folder: `${prefix}_${safeName}`,
+              trigger: `@${ASSISTANT_NAME}`,
+              added_at: new Date().toISOString(),
+              requiresTrigger: true,
+            });
+            logger.info(
+              { jid: chatJid, name: chatName },
+              'Auto-registered chat on first message',
+            );
+          }
+        }
+      }
+
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
@@ -745,7 +795,11 @@ async function main(): Promise<void> {
         if (chat.jid.startsWith('slack:')) prefix = 'slack';
         else if (chat.jid.startsWith('tg:')) prefix = 'tg';
         else if (chat.jid.startsWith('dc:')) prefix = 'dc';
-        else if (chat.jid.includes('@g.us') || chat.jid.includes('@s.whatsapp.net')) prefix = 'wa';
+        else if (
+          chat.jid.includes('@g.us') ||
+          chat.jid.includes('@s.whatsapp.net')
+        )
+          prefix = 'wa';
         else continue; // skip unknown JID formats (gmail, etc.)
 
         const safeName = chat.name
