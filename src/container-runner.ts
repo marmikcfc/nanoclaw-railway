@@ -269,10 +269,7 @@ function collectMcpEnvVars(): string[] {
  * Env var prefixes that are ALWAYS forwarded to agents, even if they
  * match a blocked prefix. Add new integration prefixes here.
  */
-const INCLUDED_ENV_PREFIXES = [
-  'LANGFUSE_',
-  'OPENROUTER_',
-];
+const INCLUDED_ENV_PREFIXES = ['LANGFUSE_', 'OPENROUTER_'];
 
 /**
  * Env var prefixes that should NOT be forwarded to agents.
@@ -310,8 +307,8 @@ function collectCustomEnvVars(): string[] {
   const keys: string[] = [];
   for (const key of Object.keys(process.env)) {
     // Always include vars matching the inclusion list
-    const isIncluded = INCLUDED_ENV_PREFIXES.some(
-      (prefix) => key.startsWith(prefix),
+    const isIncluded = INCLUDED_ENV_PREFIXES.some((prefix) =>
+      key.startsWith(prefix),
     );
     if (!isIncluded) {
       // Check if blocked

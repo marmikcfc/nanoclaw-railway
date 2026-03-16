@@ -59,7 +59,10 @@ async function initTelemetry(
     const sdk = new NodeSDK({
       spanProcessors: [
         // @ts-ignore - LangfuseSpanProcessor typing mismatch with strict mode
-        new LangfuseSpanProcessor(),
+        new LangfuseSpanProcessor({
+          flushAt: 1,           // Flush after every span (don't batch)
+          flushInterval: 1000,  // Flush at least every second
+        }),
       ],
       instrumentations: [instrumentation],
     });
