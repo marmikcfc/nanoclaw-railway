@@ -398,6 +398,7 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let lastAssistantText: string | null = null;
 
   // Load additional MCP servers from .mcp.json (synced from host)
   const extraMcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {};
@@ -509,15 +510,29 @@ async function runQuery(
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
     }
 
+    // Capture text from assistant messages as fallback for when result.result is null
+    if (message.type === 'assistant' && 'message' in message) {
+      const msg = (message as { message?: { content?: Array<{ type: string; text?: string }> } }).message;
+      if (msg?.content) {
+        for (const block of msg.content) {
+          if (block.type === 'text' && block.text) {
+            lastAssistantText = block.text;
+          }
+        }
+      }
+    }
+
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const finalText = textResult || lastAssistantText || null;
+      log(`Result #${resultCount}: subtype=${message.subtype}${finalText ? ` text=${finalText.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: finalText,
         newSessionId
       });
+      lastAssistantText = null;
     }
   }
 
