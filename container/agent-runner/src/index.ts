@@ -49,15 +49,16 @@ async function initTelemetry(secrets: Record<string, string>): Promise<void> {
     const instrumentation = new ClaudeAgentSDKInstrumentation();
     instrumentation.manuallyInstrument(ClaudeAgentSDK);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spanProcessor = new (LangfuseSpanProcessor as any)({
+      shouldExportSpan: ({ otelSpan }: { otelSpan: { instrumentationScope: { name: string } } }) =>
+        (isDefaultExportSpan as any)(otelSpan) ||
+        otelSpan.instrumentationScope.name ===
+          '@arizeai/openinference-instrumentation-claude-agent-sdk',
+    });
+
     const sdk = new NodeSDK({
-      spanProcessors: [
-        new (LangfuseSpanProcessor as new (opts: Record<string, unknown>) => unknown)({
-          shouldExportSpan: ({ otelSpan }: { otelSpan: { instrumentationScope: { name: string } } }) =>
-            (isDefaultExportSpan as (span: unknown) => boolean)(otelSpan) ||
-            otelSpan.instrumentationScope.name ===
-              '@arizeai/openinference-instrumentation-claude-agent-sdk',
-        }),
-      ],
+      spanProcessors: [spanProcessor],
       instrumentations: [instrumentation],
     });
 
