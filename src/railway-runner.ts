@@ -183,9 +183,21 @@ export async function runRailwayAgent(
 
     // Pass secrets via stdin (never exposed as env vars)
     input.secrets = readSecrets();
-    (input as unknown as Record<string, unknown>).secretKeyNames = Object.keys(
-      input.secrets,
+    const secretKeyNames = Object.keys(input.secrets);
+    const secretKeysWithValues = secretKeyNames.filter(k => input.secrets![k]);
+    logger.info(
+      {
+        group: group.name,
+        secretKeys: secretKeyNames,
+        secretKeysWithValues,
+        hasAnthropicKey: !!input.secrets.ANTHROPIC_API_KEY,
+        hasAuthToken: !!input.secrets.ANTHROPIC_AUTH_TOKEN,
+        hasBaseUrl: !!input.secrets.ANTHROPIC_BASE_URL,
+        baseUrl: input.secrets.ANTHROPIC_BASE_URL || '(not set)',
+      },
+      'Passing secrets to agent runner',
     );
+    (input as unknown as Record<string, unknown>).secretKeyNames = secretKeyNames;
     child.stdin.write(JSON.stringify(input));
     child.stdin.end();
     delete input.secrets;
@@ -272,7 +284,7 @@ export async function runRailwayAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ process: group.folder }, line);
+        if (line) logger.info({ process: group.folder, stream: 'stderr' }, line);
       }
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
@@ -287,6 +299,20 @@ export async function runRailwayAgent(
     child.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
+
+      logger.info(
+        {
+          group: group.name,
+          processName,
+          exitCode: code,
+          duration,
+          hadStreamingOutput,
+          stderrLength: stderr.length,
+          stdoutLength: stdout.length,
+          stderrTail: stderr.slice(-500) || '(empty)',
+        },
+        'Railway agent process exited',
+      );
 
       if (timedOut) {
         if (hadStreamingOutput) {

@@ -544,9 +544,18 @@ async function main(): Promise<void> {
   // Inject them into the SDK environment so the agent can authenticate.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   if (containerInput.secrets) {
+    const secretKeys = Object.keys(containerInput.secrets);
+    const nonEmptyKeys = secretKeys.filter(k => containerInput.secrets![k]);
+    log(`Received ${secretKeys.length} secret keys: ${secretKeys.join(', ')}`);
+    log(`Non-empty secret keys: ${nonEmptyKeys.join(', ')}`);
+    log(`ANTHROPIC_BASE_URL: ${containerInput.secrets.ANTHROPIC_BASE_URL || '(not set)'}`);
+    log(`ANTHROPIC_API_KEY: ${containerInput.secrets.ANTHROPIC_API_KEY ? '(set, length=' + containerInput.secrets.ANTHROPIC_API_KEY.length + ')' : '(empty or not set)'}`);
+    log(`ANTHROPIC_AUTH_TOKEN: ${containerInput.secrets.ANTHROPIC_AUTH_TOKEN ? '(set, length=' + containerInput.secrets.ANTHROPIC_AUTH_TOKEN.length + ')' : '(empty or not set)'}`);
     for (const [key, value] of Object.entries(containerInput.secrets)) {
       sdkEnv[key] = value;
     }
+  } else {
+    log('WARNING: No secrets received from host process');
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -573,7 +582,7 @@ async function main(): Promise<void> {
   let resumeAt: string | undefined;
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'}, baseUrl: ${sdkEnv.ANTHROPIC_BASE_URL || 'default'}, hasApiKey: ${!!sdkEnv.ANTHROPIC_API_KEY}, hasAuthToken: ${!!sdkEnv.ANTHROPIC_AUTH_TOKEN})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
