@@ -46,22 +46,27 @@ async function initTelemetry(
     const instrumentation = new ClaudeAgentSDKInstrumentation();
     instrumentation.manuallyInstrument(ClaudeAgentSDK);
 
-    const { Resource } = await import('@opentelemetry/resources');
+    const resourceModule = await import('@opentelemetry/resources');
+    const ResourceClass = resourceModule.Resource || (resourceModule as Record<string, unknown>).default?.Resource;
+
+    const resourceAttrs = {
+      'service.name': 'nanoclaw-agent',
+      'nanoclaw.agent.name': agentContext.assistantName || 'unknown',
+      'nanoclaw.group': agentContext.groupFolder,
+      'nanoclaw.chat_jid': agentContext.chatJid,
+      'nanoclaw.railway_service_id': secrets.RAILWAY_SERVICE_ID || process.env.RAILWAY_SERVICE_ID || '',
+    };
 
     const sdk = new NodeSDK({
-      resource: new Resource({
-        'service.name': 'nanoclaw-agent',
-        'nanoclaw.agent.name': agentContext.assistantName || 'unknown',
-        'nanoclaw.group': agentContext.groupFolder,
-        'nanoclaw.chat_jid': agentContext.chatJid,
-        'nanoclaw.railway_service_id': secrets.RAILWAY_SERVICE_ID || process.env.RAILWAY_SERVICE_ID || '',
-      }),
+      ...(ResourceClass ? { resource: new ResourceClass(resourceAttrs) } : {}),
       spanProcessors: [
         new LangfuseSpanProcessor({
-          shouldExportSpan: ({ otelSpan }: { otelSpan: { instrumentationScope: { name: string } } }) =>
-            isDefaultExportSpan(otelSpan) ||
-            otelSpan.instrumentationScope.name ===
-              '@arizeai/openinference-instrumentation-claude-agent-sdk',
+          shouldExportSpan: (ctx: Record<string, unknown>) => {
+            const span = ctx.otelSpan as { instrumentationScope?: { name?: string } } | undefined;
+            return isDefaultExportSpan(span) ||
+              span?.instrumentationScope?.name ===
+                '@arizeai/openinference-instrumentation-claude-agent-sdk';
+          },
         }),
       ],
       instrumentations: [instrumentation],
