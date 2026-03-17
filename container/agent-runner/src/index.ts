@@ -16,90 +16,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import * as ClaudeAgentSDKModule from '@anthropic-ai/claude-agent-sdk';
-import { HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
-
-// Langfuse telemetry (optional — only active when LANGFUSE_SECRET_KEY is set)
-// Follows: https://langfuse.com/integrations/frameworks/claude-agent-sdk-js
-let otelSdk: { shutdown: () => Promise<void> } | null = null;
-let otelSpanProcessor: { forceFlush: () => Promise<void> } | null = null;
-
-// Step 3 from docs: create mutable copy
-const ClaudeAgentSDK = { ...ClaudeAgentSDKModule };
-
-async function initTelemetry(
-  secrets: Record<string, string>,
-  agentContext?: { groupFolder: string; chatJid: string; assistantName?: string }
-): Promise<void> {
-  if (!secrets.LANGFUSE_SECRET_KEY) {
-    log('Langfuse telemetry skipped: LANGFUSE_SECRET_KEY not in secrets');
-    return;
-  }
-
-  try {
-    // Step 2 from docs: set env vars BEFORE importing OTEL modules
-    process.env.LANGFUSE_PUBLIC_KEY = secrets.LANGFUSE_PUBLIC_KEY || '';
-    process.env.LANGFUSE_SECRET_KEY = secrets.LANGFUSE_SECRET_KEY;
-    process.env.LANGFUSE_BASE_URL = secrets.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com';
-
-    // Set OTEL resource attributes for agent-level tagging in Langfuse
-    process.env.OTEL_SERVICE_NAME = 'nanoclaw-agent';
-    if (agentContext) {
-      process.env.OTEL_RESOURCE_ATTRIBUTES = [
-        `nanoclaw.agent.name=${agentContext.assistantName || 'unknown'}`,
-        `nanoclaw.group=${agentContext.groupFolder}`,
-        `nanoclaw.chat_jid=${agentContext.chatJid}`,
-      ].join(',');
-    }
-
-    // Step 3 from docs: exact same code
-    const { NodeSDK } = await import('@opentelemetry/sdk-node');
-    const { LangfuseSpanProcessor, isDefaultExportSpan } = await import('@langfuse/otel');
-    const { ClaudeAgentSDKInstrumentation } = await import(
-      '@arizeai/openinference-instrumentation-claude-agent-sdk'
-    );
-
-    const instrumentation = new ClaudeAgentSDKInstrumentation();
-    instrumentation.manuallyInstrument(ClaudeAgentSDK);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const spanProcessor = new (LangfuseSpanProcessor as any)({
-      flushAt: 1,           // Flush after every span
-      flushInterval: 1000,  // Flush at least every second
-      shouldExportSpan: ({ otelSpan }: { otelSpan: { instrumentationScope: { name: string } } }) =>
-        (isDefaultExportSpan as any)(otelSpan) ||
-        otelSpan.instrumentationScope.name ===
-          '@arizeai/openinference-instrumentation-claude-agent-sdk',
-    });
-
-    const sdk = new NodeSDK({
-      spanProcessors: [spanProcessor],
-      instrumentations: [instrumentation],
-    });
-
-    sdk.start();
-    otelSdk = sdk;
-    otelSpanProcessor = spanProcessor;
-    log('Langfuse telemetry initialized');
-  } catch (err) {
-    log(`Langfuse init failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-/** Flush telemetry spans without shutting down */
-async function flushTelemetry(): Promise<void> {
-  if (!otelSpanProcessor) return;
-  try {
-    await otelSpanProcessor.forceFlush();
-  } catch { /* non-fatal */ }
-}
-
-// Step 4 from docs: destructure query from instrumented copy
-// Use getter so it always reads the (potentially patched) version
-function getQuery() {
-  return ClaudeAgentSDK.query;
-}
+import * as telemetry from './telemetry.js';
 
 interface ContainerInput {
   prompt: string;
@@ -198,10 +117,6 @@ function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
-  // Flush telemetry on every output so traces appear in real-time
-  flushTelemetry()
-    .then(() => log('Langfuse flush completed'))
-    .catch((e) => log(`Langfuse flush error: ${e instanceof Error ? e.message : String(e)}`));
 }
 
 function log(message: string): void {
@@ -534,7 +449,9 @@ async function runQuery(
 
   const modelOverride = sdkEnv.ANTHROPIC_MODEL;
 
-  for await (const message of getQuery()({
+  telemetry.onQueryStart(prompt, sessionId);
+
+  for await (const message of query({
     prompt: stream,
     options: {
       ...(modelOverride ? { model: modelOverride } : {}),
@@ -582,6 +499,8 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
+    telemetry.onMessage(message as unknown as Record<string, unknown>);
+
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
@@ -625,9 +544,7 @@ async function runQuery(
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
 
-  // Wait briefly for span processor to process onEnd, then flush
-  await new Promise(r => setTimeout(r, 200));
-  await flushTelemetry();
+  await telemetry.onQueryEnd();
 
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
@@ -656,11 +573,13 @@ async function main(): Promise<void> {
     for (const [key, value] of Object.entries(containerInput.secrets)) {
       sdkEnv[key] = value;
     }
-    // Initialize Langfuse telemetry if credentials are provided
-    await initTelemetry(containerInput.secrets as Record<string, string>, {
+    // Initialize telemetry (Langfuse + SQLite)
+    await telemetry.init({
+      secrets: containerInput.secrets as Record<string, string>,
       groupFolder: containerInput.groupFolder,
       chatJid: containerInput.chatJid,
       assistantName: containerInput.assistantName,
+      dbPath: path.join(process.env.NANOCLAW_WORKSPACE_GROUP || '/workspace/group', 'agent_events.db'),
     });
   }
 
@@ -732,16 +651,7 @@ async function main(): Promise<void> {
     });
     process.exit(1);
   } finally {
-    // Flush telemetry before exit
-    if (otelSdk) {
-      try {
-        log('Flushing Langfuse telemetry...');
-        await otelSdk.shutdown();
-        log('Langfuse telemetry flushed');
-      } catch (err) {
-        log(`Langfuse flush error: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    await telemetry.shutdown();
   }
 }
 
