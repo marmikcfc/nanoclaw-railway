@@ -186,7 +186,9 @@ function writeOutput(output: ContainerOutput): void {
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
   // Flush telemetry on every output so traces appear in real-time
-  flushTelemetry().catch(() => {});
+  flushTelemetry()
+    .then(() => log('Langfuse flush completed'))
+    .catch((e) => log(`Langfuse flush error: ${e instanceof Error ? e.message : String(e)}`));
 }
 
 function log(message: string): void {
