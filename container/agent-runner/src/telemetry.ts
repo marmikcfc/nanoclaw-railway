@@ -93,6 +93,7 @@ export async function init(config: TelemetryConfig): Promise<void> {
     const proc = new (LangfuseSpanProcessor as any)({
       flushAt: 1,
       flushInterval: 1000,
+      shouldExportSpan: () => true, // Export ALL spans (we only create the ones we want)
     });
     spanProcessor = proc;
 
