@@ -22,7 +22,8 @@ import { fileURLToPath } from 'url';
 
 // Langfuse telemetry (optional — only active when LANGFUSE_SECRET_KEY is set)
 // Follows: https://langfuse.com/integrations/frameworks/claude-agent-sdk-js
-let otelSdk: { shutdown: () => Promise<void>; forceFlush: () => Promise<void> } | null = null;
+let otelSdk: { shutdown: () => Promise<void> } | null = null;
+let otelSpanProcessor: { forceFlush: () => Promise<void> } | null = null;
 
 // Step 3 from docs: create mutable copy
 const ClaudeAgentSDK = { ...ClaudeAgentSDKModule };
@@ -66,6 +67,7 @@ async function initTelemetry(secrets: Record<string, string>): Promise<void> {
 
     sdk.start();
     otelSdk = sdk;
+    otelSpanProcessor = spanProcessor;
     log('Langfuse telemetry initialized');
   } catch (err) {
     log(`Langfuse init failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
@@ -74,9 +76,9 @@ async function initTelemetry(secrets: Record<string, string>): Promise<void> {
 
 /** Flush telemetry spans without shutting down */
 async function flushTelemetry(): Promise<void> {
-  if (!otelSdk) return;
+  if (!otelSpanProcessor) return;
   try {
-    await otelSdk.forceFlush();
+    await otelSpanProcessor.forceFlush();
   } catch { /* non-fatal */ }
 }
 
