@@ -185,6 +185,8 @@ function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+  // Flush telemetry on every output so traces appear in real-time
+  flushTelemetry().catch(() => {});
 }
 
 function log(message: string): void {
