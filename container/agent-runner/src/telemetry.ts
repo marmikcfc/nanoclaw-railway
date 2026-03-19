@@ -31,6 +31,7 @@ let querySessionId: string | null = null;
 let lastAssistantText: string | null = null;
 
 // Cloud relay state
+let resolvedTenantId: string = ''; // set during init() from secrets or env
 let currentTraceId: string | null = null;
 let currentRootEventId: string | null = null;
 let seqCounter = 0;
@@ -85,7 +86,8 @@ export async function init(config: TelemetryConfig): Promise<void> {
   // Cloud relay setup (if cloud URL is configured)
   const cloudUrl = config.secrets.NANOCLAW_CLOUD_URL || process.env.NANOCLAW_CLOUD_URL;
   const eventSecret = config.secrets.NANOCLAW_EVENT_SECRET || process.env.NANOCLAW_EVENT_SECRET;
-  const tenantId = process.env.TENANT_ID;
+  const tenantId = config.secrets.TENANT_ID || process.env.TENANT_ID;
+  resolvedTenantId = tenantId || '';
   if (cloudUrl && eventSecret && tenantId && db) {
     cloudRelay.init({ db, cloudUrl, eventSecret, tenantId });
     log('Cloud relay initialized');
@@ -165,7 +167,7 @@ export function onQueryStart(prompt: string, sessionId?: string): void {
 
   const queryStartEvent: AgentEvent = {
     id: currentTraceId,
-    tenant_id: process.env.TENANT_ID || '',
+    tenant_id: resolvedTenantId,
     trace_id: currentTraceId,
     parent_event_id: null,
     seq: seqCounter++,
@@ -281,7 +283,7 @@ function handleAssistant(message: Record<string, unknown>): void {
       const thinkingText = (block.thinking || block.text) as string;
       const reasoningEvent: AgentEvent = {
         id: randomUUID(),
-        tenant_id: process.env.TENANT_ID || '',
+        tenant_id: resolvedTenantId,
         trace_id: currentTraceId || '',
         parent_event_id: currentRootEventId,
         seq: seqCounter++,
@@ -331,7 +333,7 @@ function handleAssistant(message: Record<string, unknown>): void {
       toolUseIdToCloudId.set(toolUseId, toolCloudId);
       const toolCloudEvent: AgentEvent = {
         id: toolCloudId,
-        tenant_id: process.env.TENANT_ID || '',
+        tenant_id: resolvedTenantId,
         trace_id: currentTraceId || '',
         parent_event_id: currentRootEventId,
         seq: seqCounter++,
@@ -379,7 +381,7 @@ function handleToolResult(message: Record<string, unknown>): void {
   const toolCallCloudId = parentId ? toolUseIdToCloudId.get(parentId) : null;
   const toolResultEvent: AgentEvent = {
     id: randomUUID(),
-    tenant_id: process.env.TENANT_ID || '',
+    tenant_id: resolvedTenantId,
     trace_id: currentTraceId || '',
     parent_event_id: toolCallCloudId || currentRootEventId,
     seq: seqCounter++,
@@ -427,7 +429,7 @@ function handleSubagentStart(message: Record<string, unknown>): void {
   taskIdToCloudId.set(taskId, subStartCloudId);
   const subStartEvent: AgentEvent = {
     id: subStartCloudId,
-    tenant_id: process.env.TENANT_ID || '',
+    tenant_id: resolvedTenantId,
     trace_id: currentTraceId || '',
     parent_event_id: currentRootEventId,
     seq: seqCounter++,
@@ -487,7 +489,7 @@ function handleSubagentEnd(message: Record<string, unknown>): void {
   const subStartCloudIdForEnd = taskIdToCloudId.get(taskId);
   const subEndEvent: AgentEvent = {
     id: randomUUID(),
-    tenant_id: process.env.TENANT_ID || '',
+    tenant_id: resolvedTenantId,
     trace_id: currentTraceId || '',
     parent_event_id: subStartCloudIdForEnd || currentRootEventId,
     seq: seqCounter++,
@@ -560,7 +562,7 @@ function handleResult(message: Record<string, unknown>): void {
   const isError = (message.subtype as string)?.startsWith('error');
   const resultEvent: AgentEvent = {
     id: randomUUID(),
-    tenant_id: process.env.TENANT_ID || '',
+    tenant_id: resolvedTenantId,
     trace_id: currentTraceId || '',
     parent_event_id: currentRootEventId,
     seq: seqCounter++,
@@ -582,7 +584,7 @@ function handleResult(message: Record<string, unknown>): void {
   if (currentRootEventId) {
     const completeEvent: AgentEvent = {
       id: currentRootEventId,
-      tenant_id: process.env.TENANT_ID || '',
+      tenant_id: resolvedTenantId,
       trace_id: currentTraceId || '',
       parent_event_id: null,
       seq: 0,
