@@ -91,6 +91,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: re-request pairing code (WhatsApp only).
+  refreshPairing?(): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
