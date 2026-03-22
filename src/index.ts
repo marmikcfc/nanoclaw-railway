@@ -70,6 +70,7 @@ import { syncSkillsOnStartup } from './skill-installer.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { setChannels, startApiServer } from './api-server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -823,6 +824,12 @@ async function main(): Promise<void> {
         );
       }
     }
+  }
+
+  // Start API server for cloud-to-runtime commands (Railway injects PORT when public domain exists)
+  setChannels(channels);
+  if (process.env.PORT) {
+    startApiServer(Number(process.env.PORT));
   }
 
   // Start subsystems (independently of connection handler)
