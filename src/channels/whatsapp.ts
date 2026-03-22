@@ -379,6 +379,16 @@ export class WhatsAppChannel implements Channel {
     return this.syncGroupMetadata(force);
   }
 
+  async refreshPairing(): Promise<void> {
+    if (!process.env.WHATSAPP_PHONE) {
+      throw new Error('WHATSAPP_PHONE not configured');
+    }
+    logger.info('Refreshing WhatsApp pairing code...');
+    this.pairingRequested = false;
+    await this.disconnect();
+    await this.connect();
+  }
+
   /**
    * Sync group metadata from WhatsApp.
    * Fetches all participating groups and stores their names in the database.
