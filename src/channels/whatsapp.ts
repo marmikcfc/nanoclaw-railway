@@ -45,6 +45,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private pairingRequested = false;
 
   private opts: WhatsAppChannelOpts;
 
@@ -116,7 +117,8 @@ export class WhatsAppChannel implements Channel {
 
     // Railway auto-pairing: request pairing code when WHATSAPP_PHONE is set
     const whatsappPhone = process.env.WHATSAPP_PHONE;
-    if (IS_RAILWAY && whatsappPhone && !state.creds.registered) {
+    if (IS_RAILWAY && whatsappPhone && !state.creds.registered && !this.pairingRequested) {
+      this.pairingRequested = true;
       setTimeout(async () => {
         try {
           // Strip leading + for Baileys
@@ -185,6 +187,7 @@ export class WhatsAppChannel implements Channel {
             logger.info(
               'Logged out on Railway. Clearing auth state and requesting new pairing code...',
             );
+            this.pairingRequested = false;
             const authDir = path.join(STORE_DIR, 'auth');
             try {
               fs.rmSync(authDir, { recursive: true, force: true });
