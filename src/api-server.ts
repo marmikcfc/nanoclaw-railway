@@ -13,7 +13,11 @@ export function setChannels(channels: Channel[]): void {
 
 function verifyHmac(body: string, signatureHeader: string | undefined): boolean {
   const secret = process.env.NANOCLAW_EVENT_SECRET;
-  if (!secret || !signatureHeader) return false;
+  if (!secret) {
+    logger.warn('NANOCLAW_EVENT_SECRET not set — rejecting command request');
+    return false;
+  }
+  if (!signatureHeader) return false;
   const expected = createHmac('sha256', secret).update(body).digest('hex');
   if (expected.length !== signatureHeader.length) return false;
   return timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
@@ -24,10 +28,21 @@ function json(res: http.ServerResponse, status: number, data: unknown): void {
   res.end(JSON.stringify(data));
 }
 
+const MAX_BODY_BYTES = 64 * 1024; // 64KB — generous for command payloads
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    let bytes = 0;
+    req.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error('Request body too large'));
+        return;
+      }
+      body += chunk.toString();
+    });
     req.on('end', () => resolve(body));
     req.on('error', reject);
   });
@@ -44,7 +59,7 @@ async function handleHealth(res: http.ServerResponse): Promise<void> {
   });
 }
 
-async function handleRefreshPairing(res: http.ServerResponse): Promise<void> {
+async function handleRefreshPairing(_body: unknown, res: http.ServerResponse): Promise<void> {
   const waChannel = connectedChannels.find((ch) => ch.name === 'whatsapp');
   if (!waChannel) {
     json(res, 404, { error: 'WhatsApp channel not active' });
@@ -54,17 +69,16 @@ async function handleRefreshPairing(res: http.ServerResponse): Promise<void> {
     json(res, 501, { error: 'Channel does not support pairing refresh' });
     return;
   }
-  try {
-    await waChannel.refreshPairing();
-    json(res, 200, { success: true });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+  // Fire-and-forget: pairing requires user interaction (entering code on phone)
+  // which takes longer than the proxy timeout. Return immediately and let the
+  // new pairing code arrive via the existing pushToCloud → Realtime path.
+  waChannel.refreshPairing().catch((err) => {
     logger.error({ err }, 'Failed to refresh pairing');
-    json(res, 500, { error: message });
-  }
+  });
+  json(res, 200, { success: true, message: 'Pairing refresh initiated' });
 }
 
-const ALLOWED_COMMANDS: Record<string, (res: http.ServerResponse) => Promise<void>> = {
+const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse) => Promise<void>> = {
   'refresh-pairing': handleRefreshPairing,
 };
 
@@ -95,7 +109,9 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
 
-    return handler(res);
+    let parsed: unknown = {};
+    try { parsed = JSON.parse(body); } catch {}
+    return handler(parsed, res);
   }
 
   json(res, 404, { error: 'Not found' });
