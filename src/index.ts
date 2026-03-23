@@ -697,6 +697,12 @@ async function main(): Promise<void> {
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
+  // Start API server early so cloud commands (e.g. "Get New Code") work during initial pairing.
+  // setChannels is called after channels connect — handlers tolerate an empty channel list.
+  if (process.env.PORT) {
+    startApiServer(Number(process.env.PORT));
+  }
+
   // Factories return null when credentials are missing, so unconfigured channels are skipped.
   for (const channelName of getRegisteredChannelNames()) {
     const factory = getChannelFactory(channelName)!;
@@ -709,6 +715,7 @@ async function main(): Promise<void> {
       continue;
     }
     channels.push(channel);
+    setChannels(channels);  // Update API server immediately so commands work during connect()
     await channel.connect();
   }
   if (channels.length === 0) {
@@ -826,11 +833,8 @@ async function main(): Promise<void> {
     }
   }
 
-  // Start API server for cloud-to-runtime commands (Railway injects PORT when public domain exists)
+  // Final setChannels ensures the API server sees all connected channels
   setChannels(channels);
-  if (process.env.PORT) {
-    startApiServer(Number(process.env.PORT));
-  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
