@@ -97,6 +97,10 @@ export class WhatsAppChannel implements Channel {
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
+    // Clear flag so events on the NEW socket aren't swallowed by a stale flag
+    // from a previous refreshPairing() whose disconnect() was a no-op.
+    this.intentionalDisconnect = false;
+
     const authDir = path.join(STORE_DIR, 'auth');
     fs.mkdirSync(authDir, { recursive: true });
 
