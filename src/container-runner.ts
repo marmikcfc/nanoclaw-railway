@@ -44,7 +44,6 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
@@ -65,7 +64,6 @@ interface VolumeMount {
 
 function buildVolumeMounts(
   group: RegisteredGroup,
-  isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -197,7 +195,6 @@ function buildVolumeMounts(
     const validatedMounts = validateAdditionalMounts(
       group.containerConfig.additionalMounts,
       group.name,
-      isMain,
     );
     mounts.push(...validatedMounts);
   }
@@ -401,7 +398,7 @@ export async function runContainerAgent(
     return runRailwayAgent(group, input, onProcess, onOutput);
   }
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -424,7 +421,6 @@ export async function runContainerAgent(
       group: group.name,
       containerName,
       mountCount: mounts.length,
-      isMain: input.isMain,
     },
     'Spawning container agent',
   );
@@ -626,7 +622,6 @@ export async function runContainerAgent(
         `=== Container Run Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
-        `IsMain: ${input.isMain}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Stdout Truncated: ${stdoutTruncated}`,
@@ -778,7 +773,6 @@ export async function runContainerAgent(
 
 export function writeTasksSnapshot(
   groupFolder: string,
-  isMain: boolean,
   tasks: Array<{
     id: string;
     groupFolder: string;
@@ -814,7 +808,6 @@ export interface AvailableGroup {
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
-  isMain: boolean,
   groups: AvailableGroup[],
   registeredJids: Set<string>,
 ): void {

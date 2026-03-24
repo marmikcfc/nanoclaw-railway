@@ -347,14 +347,12 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = false; // All admin operations moved to dashboard
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
-    isMain,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -366,11 +364,10 @@ async function runAgent(
     })),
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Update available groups snapshot
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
-    isMain,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
@@ -394,7 +391,6 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        isMain,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
@@ -781,7 +777,6 @@ async function main(): Promise<void> {
           isDM: chatIsDM || undefined,
           requiresTrigger: !chatIsDM,
         });
-        delete (registeredGroups[jid] as any).isMain;
         logger.info({ jid, newFolder, isDM: chatIsDM }, 'Migrated main group registration');
       }
     }
@@ -866,8 +861,8 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, ag, rj) =>
+      writeGroupsSnapshot(gf, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

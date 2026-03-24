@@ -591,7 +591,6 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
-        is_main: number | null;
         is_dm: number | null;
       }
     | undefined;
@@ -646,7 +645,6 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
-    is_main: number | null;
     is_dm: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};

@@ -232,7 +232,6 @@ export interface MountValidationResult {
  */
 export function validateMount(
   mount: AdditionalMount,
-  isMain: boolean,
 ): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
@@ -327,7 +326,6 @@ export function validateMount(
 export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
-  isMain: boolean,
 ): Array<{
   hostPath: string;
   containerPath: string;
@@ -342,7 +340,7 @@ export function validateAdditionalMounts(
   }> = [];
 
   for (const mount of mounts) {
-    const result = validateMount(mount, isMain);
+    const result = validateMount(mount);
 
     if (result.allowed) {
       validatedMounts.push({

@@ -34,7 +34,6 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
  */
 function prepareWorkspace(
   group: RegisteredGroup,
-  isMain: boolean,
 ): {
   groupDir: string;
   globalDir: string | undefined;
@@ -130,7 +129,6 @@ export async function runRailwayAgent(
   const startTime = Date.now();
   const { groupDir, globalDir, extraDir, ipcDir, claudeDir } = prepareWorkspace(
     group,
-    input.isMain,
   );
 
   const agentRunnerPath =
@@ -144,7 +142,6 @@ export async function runRailwayAgent(
       group: group.name,
       processName,
       agentRunnerPath,
-      isMain: input.isMain,
     },
     'Spawning Railway agent process',
   );
