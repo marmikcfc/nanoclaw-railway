@@ -4,10 +4,10 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   IS_RAILWAY,
   POLL_INTERVAL,
-  SLACK_MAIN_CHANNEL_ID,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -69,6 +69,7 @@ import { syncMcpOnStartup } from './mcp-installer.js';
 import { syncSkillsOnStartup } from './skill-installer.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { inferIsDM } from './jid-utils.js';
 import { logger } from './logger.js';
 import { setChannels, startApiServer } from './api-server.js';
 
@@ -169,7 +170,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.isMain === true;
+  const isDM = group.isDM === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -180,8 +181,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // For non-DM chats, check if trigger is required and present
+  if (!isDM && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
@@ -296,7 +297,7 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = group.isMain === true;
+  const isMain = false; // All admin operations moved to dashboard
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -417,10 +418,10 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const isDM = group.isDM === true;
+          const needsTrigger = !isDM && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
+          // For non-DM chats, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
@@ -562,44 +563,17 @@ async function main(): Promise<void> {
 
   // Handle /remote-control and /remote-control-end commands
   async function handleRemoteControl(
-    command: string,
+    _command: string,
     chatJid: string,
-    msg: NewMessage,
+    _msg: NewMessage,
   ): Promise<void> {
-    const group = registeredGroups[chatJid];
-    if (!group?.isMain) {
-      logger.warn(
-        { chatJid, sender: msg.sender },
-        'Remote control rejected: not main group',
-      );
-      return;
-    }
-
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
-    if (command === '/remote-control') {
-      const result = await startRemoteControl(
-        msg.sender,
-        chatJid,
-        process.cwd(),
-      );
-      if (result.ok) {
-        await channel.sendMessage(chatJid, result.url);
-      } else {
-        await channel.sendMessage(
-          chatJid,
-          `Remote Control failed: ${result.error}`,
-        );
-      }
-    } else {
-      const result = stopRemoteControl();
-      if (result.ok) {
-        await channel.sendMessage(chatJid, 'Remote Control session ended.');
-      } else {
-        await channel.sendMessage(chatJid, result.error);
-      }
-    }
+    await channel.sendMessage(
+      chatJid,
+      'Remote control is managed from the dashboard.',
+    );
   }
 
   // Channel callbacks (shared by all channels)
@@ -615,8 +589,7 @@ async function main(): Promise<void> {
       }
 
       // Auto-register unregistered chats on first message.
-      // If no main group exists, the first chat becomes main (no trigger needed).
-      // Otherwise, register as a normal chat (trigger required).
+      // DMs don't require trigger, groups do.
       if (!registeredGroups[chatJid]) {
         let prefix: string | undefined;
         if (chatJid.startsWith('slack:')) prefix = 'slack';
@@ -629,41 +602,25 @@ async function main(): Promise<void> {
           prefix = 'wa';
 
         if (prefix) {
-          const hasMain = Object.values(registeredGroups).some(
-            (g) => g.isMain === true,
-          );
           const chatName = msg.sender_name || chatJid;
           const safeName = chatName
             .replace(/[^a-zA-Z0-9-]/g, '-')
             .toLowerCase()
             .slice(0, 50);
+          const chatIsDM = inferIsDM(chatJid);
 
-          if (!hasMain) {
-            registerGroup(chatJid, {
-              name: chatName,
-              folder: 'main',
-              trigger: `@${ASSISTANT_NAME}`,
-              added_at: new Date().toISOString(),
-              isMain: true,
-              requiresTrigger: false,
-            });
-            logger.info(
-              { jid: chatJid, name: chatName },
-              'Auto-registered first chat as main',
-            );
-          } else {
-            registerGroup(chatJid, {
-              name: chatName,
-              folder: `${prefix}_${safeName}`,
-              trigger: `@${ASSISTANT_NAME}`,
-              added_at: new Date().toISOString(),
-              requiresTrigger: true,
-            });
-            logger.info(
-              { jid: chatJid, name: chatName },
-              'Auto-registered chat on first message',
-            );
-          }
+          registerGroup(chatJid, {
+            name: chatName,
+            folder: `${prefix}_${safeName}`,
+            trigger: `@${ASSISTANT_NAME}`,
+            added_at: new Date().toISOString(),
+            requiresTrigger: !chatIsDM,
+            isDM: chatIsDM || undefined,
+          });
+          logger.info(
+            { jid: chatJid, name: chatName, isDM: chatIsDM },
+            'Auto-registered chat on first message',
+          );
         }
       }
 
@@ -723,71 +680,44 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Auto-register main group (zero-config Railway deploy).
-  // Runs on every startup but only acts when no groups are registered yet.
-  // Once registered, the group persists in SQLite across restarts.
-  if (Object.keys(registeredGroups).length === 0) {
-    // Sync groups first so we have chat metadata
-    await Promise.all(
-      channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(true)),
+  // Migrate existing 'main' folder to prefix_safename format
+  {
+    const mainGroup = Object.entries(registeredGroups).find(
+      ([, g]) => g.folder === 'main',
     );
+    if (mainGroup) {
+      const [jid, group] = mainGroup;
+      let prefix: string | undefined;
+      if (jid.startsWith('slack:')) prefix = 'slack';
+      else if (jid.startsWith('tg:')) prefix = 'tg';
+      else if (jid.startsWith('dc:')) prefix = 'dc';
+      else if (jid.includes('@g.us') || jid.includes('@s.whatsapp.net')) prefix = 'wa';
 
-    let mainJid: string | undefined;
-    let mainName: string | undefined;
+      if (prefix) {
+        const safeName = (group.name || jid)
+          .replace(/[^a-zA-Z0-9-]/g, '-')
+          .toLowerCase()
+          .slice(0, 50);
+        const newFolder = `${prefix}_${safeName}`;
+        const oldPath = path.join(GROUPS_DIR, 'main');
+        const newPath = path.join(GROUPS_DIR, newFolder);
 
-    // Priority 1: SLACK_MAIN_CHANNEL_ID — directly register a Slack channel as main
-    if (SLACK_MAIN_CHANNEL_ID) {
-      mainJid = `slack:${SLACK_MAIN_CHANNEL_ID}`;
-      mainName = ASSISTANT_NAME;
-      logger.info(
-        { channelId: SLACK_MAIN_CHANNEL_ID },
-        'Using SLACK_MAIN_CHANNEL_ID for main group',
-      );
-    }
+        if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+          fs.renameSync(oldPath, newPath);
+          logger.info({ oldFolder: 'main', newFolder }, 'Migrated main folder');
+        }
 
-    // Priority 2: Match ASSISTANT_NAME against chat names
-    if (!mainJid) {
-      const allChats = getAllChats();
-      const match = allChats.find(
-        (c) => c.name?.toLowerCase() === ASSISTANT_NAME.toLowerCase(),
-      );
-      if (match) {
-        mainJid = match.jid;
-        mainName = match.name || ASSISTANT_NAME;
+        // Re-register with new folder name and isDM
+        const chatIsDM = inferIsDM(jid);
+        registerGroup(jid, {
+          ...group,
+          folder: newFolder,
+          isDM: chatIsDM || undefined,
+          requiresTrigger: !chatIsDM,
+        });
+        delete (registeredGroups[jid] as any).isMain;
+        logger.info({ jid, newFolder, isDM: chatIsDM }, 'Migrated main group registration');
       }
-
-      // Priority 3: Use first available chat (covers DMs where chat name
-      // is the user's name, not the bot's)
-      if (!mainJid && allChats.length > 0) {
-        mainJid = allChats[0].jid;
-        mainName = allChats[0].name || ASSISTANT_NAME;
-        logger.info(
-          { jid: mainJid, name: mainName },
-          'No chat matching ASSISTANT_NAME — using first available chat as main',
-        );
-      }
-
-      if (!mainJid) {
-        logger.warn(
-          { assistantName: ASSISTANT_NAME },
-          'No chats found. Send a message to the bot, then restart.',
-        );
-      }
-    }
-
-    if (mainJid) {
-      registerGroup(mainJid, {
-        name: mainName || ASSISTANT_NAME,
-        folder: 'main',
-        trigger: `@${ASSISTANT_NAME}`,
-        added_at: new Date().toISOString(),
-        isMain: true,
-        requiresTrigger: false,
-      });
-      logger.info(
-        { jid: mainJid, name: mainName },
-        'Auto-registered main group',
-      );
     }
   }
 
@@ -801,7 +731,6 @@ async function main(): Promise<void> {
     const allChats = getAllChats();
     for (const chat of allChats) {
       if (!registeredGroups[chat.jid] && chat.name) {
-        // Derive channel prefix for folder name
         let prefix: string;
         if (chat.jid.startsWith('slack:')) prefix = 'slack';
         else if (chat.jid.startsWith('tg:')) prefix = 'tg';
@@ -818,15 +747,17 @@ async function main(): Promise<void> {
           .toLowerCase()
           .slice(0, 50);
         const folderName = `${prefix}_${safeName}`;
+        const chatIsDM = chat.is_group === 0 || ((chat.is_group as number | null) === null && inferIsDM(chat.jid));
         registerGroup(chat.jid, {
           name: chat.name,
           folder: folderName,
           trigger: `@${ASSISTANT_NAME}`,
           added_at: new Date().toISOString(),
-          requiresTrigger: true,
+          requiresTrigger: !chatIsDM,
+          isDM: chatIsDM || undefined,
         });
         logger.info(
-          { jid: chat.jid, name: chat.name, folder: folderName },
+          { jid: chat.jid, name: chat.name, folder: folderName, isDM: chatIsDM },
           'Auto-registered chat',
         );
       }

@@ -294,16 +294,7 @@ export function validateMount(
   let effectiveReadonly = true; // Default to readonly
 
   if (requestedReadWrite) {
-    if (!isMain && allowlist.nonMainReadOnly) {
-      // Non-main groups forced to read-only
-      effectiveReadonly = true;
-      logger.info(
-        {
-          mount: mount.hostPath,
-        },
-        'Mount forced to read-only for non-main group',
-      );
-    } else if (!allowedRoot.allowReadWrite) {
+    if (!allowedRoot.allowReadWrite) {
       // Root doesn't allow read-write
       effectiveReadonly = true;
       logger.info(

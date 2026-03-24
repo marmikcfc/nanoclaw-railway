@@ -130,7 +130,7 @@ async function runTask(
   }
 
   // Update tasks snapshot for container to read (filtered by group)
-  const isMain = group.isMain === true;
+  const isMain = false; // All admin operations moved to dashboard
   const tasks = getAllTasks();
   writeTasksSnapshot(
     task.group_folder,

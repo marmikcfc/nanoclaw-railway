@@ -64,12 +64,10 @@ function prepareWorkspace(
     }
   }
 
-  // Global memory directory (for non-main groups)
+  // Global memory directory (read-only for all chats)
   let globalDir: string | undefined;
-  if (!isMain) {
-    const gd = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(gd)) globalDir = gd;
-  }
+  const gd = path.join(GROUPS_DIR, 'global');
+  if (fs.existsSync(gd)) globalDir = gd;
 
   // Per-group Claude sessions directory
   const claudeDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');

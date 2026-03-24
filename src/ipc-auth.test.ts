@@ -17,7 +17,6 @@ const MAIN_GROUP: RegisteredGroup = {
   folder: 'whatsapp_main',
   trigger: 'always',
   added_at: '2024-01-01T00:00:00.000Z',
-  isMain: true,
 };
 
 const OTHER_GROUP: RegisteredGroup = {

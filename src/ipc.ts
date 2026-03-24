@@ -63,14 +63,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
     const registeredGroups = deps.registeredGroups();
 
-    // Build folder→isMain lookup from registered groups
-    const folderIsMain = new Map<string, boolean>();
-    for (const group of Object.values(registeredGroups)) {
-      if (group.isMain) folderIsMain.set(group.folder, true);
-    }
-
     for (const sourceGroup of groupFolders) {
-      const isMain = folderIsMain.get(sourceGroup) === true;
+      const isMain = false; // All admin operations moved to dashboard
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
 
@@ -410,7 +404,7 @@ export async function processTaskIpc(
       break;
 
     case 'refresh_groups':
-      // Only main group can request a refresh
+      // Admin operation — managed from the dashboard
       if (isMain) {
         logger.info(
           { sourceGroup },
@@ -434,7 +428,7 @@ export async function processTaskIpc(
       break;
 
     case 'register_group':
-      // Only main group can register new groups
+      // Admin operation — managed from the dashboard
       if (!isMain) {
         logger.warn(
           { sourceGroup },
@@ -450,7 +444,7 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC
+        // Defense in depth: agent cannot set admin flags via IPC
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
