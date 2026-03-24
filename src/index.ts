@@ -808,7 +808,7 @@ async function main(): Promise<void> {
           .toLowerCase()
           .slice(0, 50);
         const folderName = `${prefix}_${safeName}`;
-        const chatIsDM = chat.is_group === 0 || ((chat.is_group as number | null) === null && inferIsDM(chat.jid));
+        const chatIsDM = chat.is_group === 1 ? false : inferIsDM(chat.jid);
         registerGroup(chat.jid, {
           name: chat.name,
           folder: folderName,
