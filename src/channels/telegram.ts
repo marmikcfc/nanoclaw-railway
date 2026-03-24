@@ -117,8 +117,10 @@ export class TelegramChannel implements Channel {
         isGroup,
       );
 
-      // Deliver message — the orchestrator handles registration
-      // for unregistered chats dynamically
+      // Only deliver message content for registered chats
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
       this.opts.onMessage(chatJid, {
         id: msgId,
         chat_jid: chatJid,
