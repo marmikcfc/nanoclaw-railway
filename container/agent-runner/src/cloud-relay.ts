@@ -115,9 +115,10 @@ async function flushBuffer(): Promise<void> {
       retryDelayMs = Math.min(retryAfter * 1000, MAX_RETRY_DELAY_MS);
       log(`rate limited, retry after ${retryAfter}s`);
     } else {
+      const bodyText = await resp.text().catch(() => '');
       buffer.unshift(...batch); // put back for retry
       retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
-      log(`push failed (${resp.status}), retry in ${retryDelayMs}ms`);
+      log(`push failed (${resp.status}): ${bodyText}, retry in ${retryDelayMs}ms`);
     }
   } catch (err) {
     buffer.unshift(...batch); // put back for retry
