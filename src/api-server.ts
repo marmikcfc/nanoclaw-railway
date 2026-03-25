@@ -169,6 +169,46 @@ async function handleRemoveNumber(body: unknown, res: http.ServerResponse): Prom
   }
 }
 
+async function handleSendFile(body: unknown, res: http.ServerResponse): Promise<void> {
+  const p = body as {
+    artifact_id?: string;
+    filename?: string;
+    mime_type?: string;
+    ephemeral_url?: string;
+    chat_jid?: string;
+    channel?: string;
+  };
+
+  if (!p.ephemeral_url || !p.chat_jid || !p.filename) {
+    json(res, 400, { error: 'Missing ephemeral_url, chat_jid, or filename' });
+    return;
+  }
+
+  // Find the right channel — prefer the specified one, fall back to any connected
+  const channel = connectedChannels.find(
+    (ch) => ch.isConnected() && (!p.channel || ch.name === p.channel),
+  ) ?? connectedChannels.find((ch) => ch.isConnected());
+
+  if (!channel) {
+    json(res, 503, { error: 'No connected channel available' });
+    return;
+  }
+
+  if (!channel.sendFile) {
+    json(res, 501, { error: `Channel "${channel.name}" does not support sendFile` });
+    return;
+  }
+
+  // Acknowledge immediately; delivery is async
+  json(res, 200, { ok: true });
+
+  channel.sendFile(p.chat_jid, p.ephemeral_url, p.filename, p.mime_type ?? 'application/octet-stream').catch(
+    (err) => {
+      logger.error({ err, artifact_id: p.artifact_id, chat_jid: p.chat_jid }, 'sendFile failed');
+    },
+  );
+}
+
 const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse) => Promise<void>> = {
   'refresh-pairing': handleRefreshPairing,
   'enable-integration': handleEnableIntegration,
@@ -176,6 +216,7 @@ const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse)
   'webhook-event': handleWebhookEvent,
   'allow-number': handleAllowNumber,
   'remove-number': handleRemoveNumber,
+  'send-file': handleSendFile,
 };
 
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

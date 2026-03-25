@@ -94,6 +94,8 @@ export interface Channel {
   // Optional: re-request pairing code (WhatsApp only).
   refreshPairing?(): Promise<void>;
   getConnectedPhone?(): string | undefined;
+  // Optional: send a file to a chat by URL.
+  sendFile?(jid: string, url: string, filename: string, mimeType: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
