@@ -772,7 +772,7 @@ async function main(): Promise<void> {
     channels.push(channel);
     setChannels(channels);  // Update API server immediately so commands work during connect()
   }
-  if (connectableChannels.length === 0) {
+  if (connectableChannels.filter(c => c.name !== 'webchat').length === 0) {
     logger.fatal('No channels configured');
     process.exit(1);
   }
