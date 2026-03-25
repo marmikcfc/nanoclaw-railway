@@ -232,6 +232,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  // Log incoming messages for observability
+  logger.info(
+    {
+      group: group.name,
+      isDM,
+      messageCount: missedMessages.length,
+      messages: missedMessages.map((m) => ({
+        sender: m.sender,
+        content: m.content.slice(0, 200),
+      })),
+    },
+    'Incoming messages',
+  );
+
   // For non-DM chats, check if trigger is required and present
   if (!isDM && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
@@ -239,6 +253,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       (m) =>
         TRIGGER_PATTERN.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+    );
+    logger.info(
+      {
+        group: group.name,
+        hasTrigger,
+        triggerPattern: TRIGGER_PATTERN.toString(),
+        messageContents: missedMessages.map((m) => m.content.slice(0, 100)),
+      },
+      hasTrigger ? 'Trigger found — invoking agent' : 'No trigger found — skipping agent',
     );
     if (!hasTrigger) return true;
   }
@@ -298,10 +321,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+      logger.info(
+        {
+          group: group.name,
+          rawLength: raw.length,
+          textLength: text.length,
+          response: text.slice(0, 500),
+        },
+        'Agent response',
+      );
       if (text) {
         await channel.sendMessage(chatJid, text);
+        logger.info({ group: group.name, chatJid, textLength: text.length }, 'Response sent to user');
         outputSentToUser = true;
+      } else {
+        logger.warn({ group: group.name, rawLength: raw.length }, 'Agent response was empty after stripping <internal> blocks — nothing sent to user');
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
