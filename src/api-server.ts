@@ -18,6 +18,18 @@ export function setAllowedNumberFns(
   _removeAllowedNumber = remove;
 }
 
+// Lazily resolved callbacks for webchat JID handling
+let _enqueueWebchat: ((jid: string) => void) | undefined;
+let _getWebchatChannel: (() => import('./channels/webchat.js').WebchatChannel | undefined) | undefined;
+
+export function setWebchatFns(
+  enqueue: (jid: string) => void,
+  getChannel: () => import('./channels/webchat.js').WebchatChannel | undefined,
+): void {
+  _enqueueWebchat = enqueue;
+  _getWebchatChannel = getChannel;
+}
+
 let connectedChannels: Channel[] = [];
 const startTime = Date.now();
 
@@ -112,6 +124,31 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
     eventType: string;
     payload: unknown;
   };
+
+  // Webchat path: bypass groupEntries lookup, store directly to admin@nanoclaw
+  if (integrationId === 'webchat') {
+    const { content, traceId } = (payload as { content: string; traceId: string });
+    storeMessage({
+      id: randomUUID(),
+      chat_jid: 'admin@nanoclaw',
+      sender: 'dashboard-owner',
+      sender_name: 'You',
+      content,
+      timestamp: new Date().toISOString(),
+      is_from_me: true,
+      is_bot_message: false,
+    });
+
+    // Set trace ID on channel BEFORE enqueueing so the agent loop reads it
+    const channel = _getWebchatChannel?.();
+    if (channel) {
+      channel.currentTraceId = traceId;
+    }
+
+    _enqueueWebchat?.('admin@nanoclaw');
+    json(res, 200, { ok: true });
+    return;
+  }
 
   // Deliver webhook to first registered group (single-tenant Railway deploys typically have one)
   const groups = getAllRegisteredGroups();
