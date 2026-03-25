@@ -130,13 +130,18 @@ function createSchema(database: Database.Database): void {
   // Add is_dm column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN is_dm INTEGER DEFAULT 0`);
-    // Backfill: infer isDM from JID pattern for existing rows
-    const rows = database.prepare(`SELECT jid FROM registered_groups`).all() as { jid: string }[];
-    for (const row of rows) {
-      const dm = inferIsDM(row.jid) ? 1 : 0;
-      database.prepare(`UPDATE registered_groups SET is_dm = ? WHERE jid = ?`).run(dm, row.jid);
-    }
   } catch { /* column already exists */ }
+
+  // Backfill is_dm for any rows where it hasn't been set yet (is_dm = 0 but JID is a DM).
+  // Runs unconditionally so it corrects rows that existed before the column was added.
+  {
+    const rows = database.prepare(`SELECT jid FROM registered_groups WHERE is_dm = 0`).all() as { jid: string }[];
+    for (const row of rows) {
+      if (inferIsDM(row.jid)) {
+        database.prepare(`UPDATE registered_groups SET is_dm = 1 WHERE jid = ?`).run(row.jid);
+      }
+    }
+  }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
