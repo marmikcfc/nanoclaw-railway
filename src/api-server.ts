@@ -113,16 +113,16 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
     payload: unknown;
   };
 
-  // Find main group to deliver webhook message to
+  // Deliver webhook to first registered group (single-tenant Railway deploys typically have one)
   const groups = getAllRegisteredGroups();
-  const mainGroup = Object.entries(groups).find(([, g]) => g.isMain);
-  if (!mainGroup) {
-    logger.warn({ integrationId }, 'Webhook received but no main group registered');
+  const groupEntries = Object.entries(groups);
+  if (groupEntries.length === 0) {
+    logger.warn({ integrationId }, 'Webhook received but no group registered');
     json(res, 200, { ok: true }); // don't error — agent may not have a group yet
     return;
   }
 
-  const [mainJid] = mainGroup;
+  const [mainJid] = groupEntries[0];
   storeMessage({
     id: randomUUID(),
     chat_jid: mainJid,
