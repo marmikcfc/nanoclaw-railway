@@ -135,6 +135,8 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
   });
 
   json(res, 200, { ok: true });
+}
+
 async function handleAllowNumber(body: unknown, res: http.ServerResponse): Promise<void> {
   const payload = body as Record<string, unknown>;
   const phone = payload?.phone;
