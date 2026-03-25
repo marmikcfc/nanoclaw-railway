@@ -139,10 +139,13 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
       is_bot_message: false,
     });
 
-    // Set trace ID on channel BEFORE enqueueing so the agent loop reads it
+    // Queue the trace ID on the channel BEFORE enqueueing. Using incomingTraceId
+    // (not currentTraceId) keeps the handoff separate from the restore that
+    // processGroupMessages performs just before sendMessage, preventing a new
+    // webhook from overwriting a mid-flight run's traceId.
     const channel = _getWebchatChannel?.();
     if (channel) {
-      channel.currentTraceId = traceId;
+      channel.incomingTraceId = traceId;
     }
 
     _enqueueWebchat?.('admin@nanoclaw');

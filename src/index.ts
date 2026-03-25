@@ -234,15 +234,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  // Snapshot currentTraceId for this run and clear it on the channel immediately.
-  // This prevents a second concurrent webhook from overwriting the trace ID
-  // before this run's sendMessage() reads it. The snapshot is held locally and
-  // the channel property is freed so the next webhook can safely claim it.
+  // Consume incomingTraceId for this run. api-server writes incomingTraceId
+  // (not currentTraceId) so the snapshot here never races with the restore
+  // that happens just before sendMessage(). A new webhook arriving mid-run
+  // will write its traceId into incomingTraceId and it will be correctly
+  // consumed by the next call to processGroupMessages.
   const webchatTraceId = channel.ownsJid('admin@nanoclaw')
     ? (() => {
         const wc = channel as WebchatChannel;
-        const id = wc.currentTraceId;
-        wc.currentTraceId = null;
+        const id = wc.incomingTraceId;
+        wc.incomingTraceId = null;
         return id;
       })()
     : null;

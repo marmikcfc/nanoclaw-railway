@@ -7,7 +7,18 @@ const WEBCHAT_JID = 'admin@nanoclaw';
 
 export class WebchatChannel implements Channel {
   readonly name = 'webchat';
-  /** Set by api-server before enqueueing a webchat message. Cleared after agent run. */
+  /**
+   * Set by api-server immediately before enqueueing — consumed (shifted) by
+   * processGroupMessages at the start of each run. Kept separate from
+   * currentTraceId so that a new incoming webhook cannot overwrite the trace
+   * that is mid-flight in processGroupMessages.
+   */
+  incomingTraceId: string | null = null;
+  /**
+   * Set by processGroupMessages just before calling sendMessage; read
+   * synchronously by sendMessage before its first await so no webhook
+   * can interleave between the set and the read.
+   */
   currentTraceId: string | null = null;
 
   ownsJid(jid: string): boolean {
