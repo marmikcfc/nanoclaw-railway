@@ -36,7 +36,7 @@ export class WebchatChannel implements Channel {
       tenant_id: tenantId,
       trace_id: this.currentTraceId ?? randomUUID(),
       parent_event_id: null,
-      seq: 0,
+      seq: 1,
       event_type: 'webchat_agent_message',
       status: 'complete',
       agent_name: 'agent',

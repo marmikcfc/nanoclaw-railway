@@ -234,6 +234,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  // Snapshot currentTraceId for this run and clear it on the channel immediately.
+  // This prevents a second concurrent webhook from overwriting the trace ID
+  // before this run's sendMessage() reads it. The snapshot is held locally and
+  // the channel property is freed so the next webhook can safely claim it.
+  const webchatTraceId = channel.ownsJid('admin@nanoclaw')
+    ? (() => {
+        const wc = channel as WebchatChannel;
+        const id = wc.currentTraceId;
+        wc.currentTraceId = null;
+        return id;
+      })()
+    : null;
+
   const isDM = group.isDM === true;
 
   // WhatsApp personal number mode: check whitelist for DMs
@@ -373,9 +386,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   });
 
   await channel.setTyping?.(chatJid, false);
-  if (channel.ownsJid('admin@nanoclaw')) {
-    (channel as WebchatChannel).currentTraceId = null;
-  }
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
