@@ -33,6 +33,7 @@ let lastAssistantText: string | null = null;
 // Cloud relay state
 let resolvedTenantId: string = ''; // set during init() from secrets or env
 let currentTraceId: string | null = null;
+let currentTaskId: string | null = null; // set from TASK_ID env at init()
 let currentRootEventId: string | null = null;
 let seqCounter = 0;
 let agentChannel: string = 'unknown';
@@ -88,6 +89,7 @@ export async function init(config: TelemetryConfig): Promise<void> {
   const eventSecret = config.secrets.NANOCLAW_EVENT_SECRET || process.env.NANOCLAW_EVENT_SECRET;
   const tenantId = config.secrets.TENANT_ID || process.env.TENANT_ID;
   resolvedTenantId = tenantId || '';
+  currentTaskId = config.secrets.TASK_ID || process.env.TASK_ID || null;
   if (cloudUrl && eventSecret && tenantId && db) {
     cloudRelay.init({ db, cloudUrl, eventSecret, tenantId });
     log('Cloud relay initialized');
@@ -175,6 +177,7 @@ export function onQueryStart(prompt: string, sessionId?: string): void {
     status: 'pending',
     agent_name: process.env.ASSISTANT_NAME || 'unknown',
     channel: agentChannel,
+    task_id: currentTaskId,
     data: { type: 'query_start', prompt, channel: agentChannel },
     tokens_used: null,
     cost_usd: null,
@@ -291,6 +294,7 @@ function handleAssistant(message: Record<string, unknown>): void {
         status: 'complete',
         agent_name: process.env.ASSISTANT_NAME || 'unknown',
         channel: agentChannel,
+        task_id: currentTaskId,
         data: { type: 'reasoning', text: thinkingText.slice(0, 65000) },
         tokens_used: null,
         cost_usd: null,
@@ -341,6 +345,7 @@ function handleAssistant(message: Record<string, unknown>): void {
         status: 'pending',
         agent_name: process.env.ASSISTANT_NAME || 'unknown',
         channel: agentChannel,
+        task_id: currentTaskId,
         data: { type: 'tool_call', tool_name: toolName, tool_input: toolInput, tool_use_id: toolUseId },
         tokens_used: null,
         cost_usd: null,
@@ -389,6 +394,7 @@ function handleToolResult(message: Record<string, unknown>): void {
     status: 'complete',
     agent_name: process.env.ASSISTANT_NAME || 'unknown',
     channel: agentChannel,
+    task_id: currentTaskId,
     data: {
       type: 'tool_result',
       tool_use_id: parentId || '',
@@ -437,6 +443,7 @@ function handleSubagentStart(message: Record<string, unknown>): void {
     status: 'pending',
     agent_name: process.env.ASSISTANT_NAME || 'unknown',
     channel: agentChannel,
+    task_id: currentTaskId,
     data: { type: 'subagent_start', task_id: taskId, task_description: description },
     tokens_used: null,
     cost_usd: null,
@@ -497,6 +504,7 @@ function handleSubagentEnd(message: Record<string, unknown>): void {
     status: status === 'completed' ? 'complete' : 'error',
     agent_name: process.env.ASSISTANT_NAME || 'unknown',
     channel: agentChannel,
+    task_id: currentTaskId,
     data: { type: 'subagent_end', task_id: taskId, status: status as 'completed' | 'failed' | 'stopped' },
     tokens_used: usage?.total_tokens || null,
     cost_usd: null,
@@ -570,6 +578,7 @@ function handleResult(message: Record<string, unknown>): void {
     status: isError ? 'error' : 'complete',
     agent_name: process.env.ASSISTANT_NAME || 'unknown',
     channel: agentChannel,
+    task_id: currentTaskId,
     data: isError
       ? { type: 'error', error_type: message.subtype as string, message: finalText || 'Unknown error' }
       : { type: 'response', text: finalText || '', is_error: false },
@@ -592,6 +601,7 @@ function handleResult(message: Record<string, unknown>): void {
       status: isError ? 'error' : 'complete',
       agent_name: process.env.ASSISTANT_NAME || 'unknown',
       channel: agentChannel,
+      task_id: currentTaskId,
       data: { type: 'query_start', prompt: currentPrompt, channel: agentChannel },
       tokens_used: usage ? (usage.input_tokens || 0) + (usage.output_tokens || 0) : null,
       cost_usd: totalCost || null,
