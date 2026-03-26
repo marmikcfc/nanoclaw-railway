@@ -83,7 +83,7 @@ export async function reportScheduleHint(): Promise<void> {
   const signature = createHmac('sha256', secret).update(body).digest('hex');
 
   try {
-    await fetch(`${cloudUrl}/api/tasks/${tenantId}/schedule-hint`, {
+    const res = await fetch(`${cloudUrl}/api/tasks/${tenantId}/schedule-hint`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -91,6 +91,12 @@ export async function reportScheduleHint(): Promise<void> {
       },
       body,
     });
+    if (!res.ok) {
+      logger.warn(
+        { tenantId, status: res.status },
+        'reportScheduleHint: non-OK response from cloud',
+      );
+    }
   } catch {
     // Intentionally swallowed — cloud availability must not affect task mutations
   }
