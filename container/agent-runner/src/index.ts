@@ -218,6 +218,8 @@ const CLI_PASSTHROUGH_VARS = new Set([
   'AWS_SECRET_ACCESS_KEY',
   'AWS_DEFAULT_REGION',
   'SUPABASE_ACCESS_TOKEN',
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_KEY',
 ]);
 
 function createSanitizeBashHook(extraSecretKeys: string[] = []): HookCallback {
