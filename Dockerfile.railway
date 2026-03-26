@@ -63,6 +63,10 @@ RUN ARCH=$(dpkg --print-architecture) \
     | tar xz -C /usr/local/bin supabase \
   && supabase --version
 
+# Vercel CLI (2026-03-26)
+RUN npm install -g vercel \
+  && vercel --version
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

@@ -50,6 +50,15 @@ export const INTEGRATIONS: Integration[] = [
     envVars: { accessToken: 'FIGMA_ACCESS_TOKEN' },
     implementation: { mcp: { package: 'mcp-server-figma', command: 'mcp-server-figma', args: [] } },
   },
+  {
+    id: 'vercel',
+    envVars: {
+      token: 'VERCEL_TOKEN',          // vercel CLI auth — required
+      orgId: 'VERCEL_ORG_ID',         // optional: pin team without --scope
+      projectId: 'VERCEL_PROJECT_ID', // optional: pin project without linking
+    },
+    implementation: { cli: { bin: 'vercel' } },
+  },
 ];
 
 export function getIntegration(id: string): Integration | undefined {
