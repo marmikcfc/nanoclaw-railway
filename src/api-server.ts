@@ -170,7 +170,7 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
     // webhook from overwriting a mid-flight run's traceId.
     const channel = _getWebchatChannel?.();
     if (channel) {
-      channel.incomingTraceId = traceId;
+      channel.incomingTraceIds.push(traceId);
     }
 
     _enqueueWebchat?.('admin@nanoclaw');
