@@ -108,14 +108,18 @@ function prepareWorkspace(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  // Sync CLAUDE.md template from image to volume if missing
-  // On Railway, templates live at /app/groups/ but the volume is at /data/groups/
+  // Sync CLAUDE.md template from image to volume.
+  // global/CLAUDE.md is system config — always overwrite so deploys pick up changes.
+  // Per-group CLAUDE.md is agent memory — only create once to preserve customizations.
   const templateGroupsDir = path.join(process.cwd(), 'groups');
   for (const folder of [group.folder, 'global']) {
     const targetDir = path.join(GROUPS_DIR, folder);
     const targetMd = path.join(targetDir, 'CLAUDE.md');
     const templateMd = path.join(templateGroupsDir, folder, 'CLAUDE.md');
-    if (!fs.existsSync(targetMd) && fs.existsSync(templateMd)) {
+    const shouldWrite = folder === 'global'
+      ? fs.existsSync(templateMd)                              // always overwrite global
+      : !fs.existsSync(targetMd) && fs.existsSync(templateMd); // only if missing for per-group
+    if (shouldWrite) {
       fs.mkdirSync(targetDir, { recursive: true });
       let content = fs.readFileSync(templateMd, 'utf-8');
       if (ASSISTANT_NAME !== 'Andy') {
