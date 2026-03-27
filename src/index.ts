@@ -1,3 +1,4 @@
+import { type ChildProcess } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -234,17 +235,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  // Consume incomingTraceId for this run. api-server writes incomingTraceId
-  // (not currentTraceId) so the snapshot here never races with the restore
-  // that happens just before sendMessage(). A new webhook arriving mid-run
-  // will write its traceId into incomingTraceId and it will be correctly
-  // consumed by the next call to processGroupMessages.
+  // Drain incomingTraceIds for this run — use the latest (most recent message).
+  // A queue prevents rapid messages from silently dropping earlier traceIds.
+  // A new webhook arriving mid-run pushes to the queue and will be consumed by
+  // the next call to processGroupMessages.
   const webchatTraceId = channel.ownsJid('admin@nanoclaw')
     ? (() => {
         const wc = channel as WebchatChannel;
-        const id = wc.incomingTraceId;
-        wc.incomingTraceId = null;
-        return id;
+        const ids = wc.incomingTraceIds.splice(0); // drain atomically
+        return ids.length > 0 ? ids[ids.length - 1] : null; // use most recent
       })()
     : null;
 
@@ -274,10 +273,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       group: group.name,
       isDM,
       messageCount: missedMessages.length,
-      messages: missedMessages.map((m) => ({
-        sender: m.sender,
-        content: m.content.slice(0, 200),
-      })),
     },
     'Incoming messages',
   );
@@ -294,8 +289,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       {
         group: group.name,
         hasTrigger,
-        triggerPattern: TRIGGER_PATTERN.toString(),
-        messageContents: missedMessages.map((m) => m.content.slice(0, 100)),
       },
       hasTrigger ? 'Trigger found — invoking agent' : 'No trigger found — skipping agent',
     );
@@ -372,10 +365,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Agent response',
       );
       if (text) {
-        // Restore the trace ID captured at the start of this run, right before
-        // sendMessage reads it synchronously. This is safe: JS is single-threaded,
-        // so no webhook can interleave between this set and sendMessage's first line.
-        if (webchatTraceId !== null && channel.ownsJid('admin@nanoclaw')) {
+        // Always sync currentTraceId right before sendMessage — even when null.
+        // Clearing it prevents a stale traceId from a previous run bleeding into
+        // this one if webchatTraceId is null (e.g. no new messages this cycle).
+        if (channel.ownsJid('admin@nanoclaw')) {
           (channel as WebchatChannel).currentTraceId = webchatTraceId;
         }
         await channel.sendMessage(chatJid, text);
@@ -837,7 +830,7 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid: string, proc, containerName: string, groupFolder: string) =>
+    onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid: string, rawText: string) => {
       const channel = findChannel(channels, jid);

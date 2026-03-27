@@ -21,7 +21,12 @@ export const INTEGRATIONS: Integration[] = [
   },
   {
     id: 'supabase',
-    envVars: { url: 'SUPABASE_URL', serviceKey: 'SUPABASE_SERVICE_KEY', accessToken: 'SUPABASE_ACCESS_TOKEN' },
+    envVars: {
+      url: 'SUPABASE_URL',
+      accessToken: 'SUPABASE_ACCESS_TOKEN', // management API (projects list, link)
+      dbPassword: 'SUPABASE_DB_PASSWORD',   // direct postgres (inspect db, db execute, db dump)
+      serviceKey: 'SUPABASE_SERVICE_KEY',   // REST API (optional)
+    },
     implementation: { cli: { bin: 'supabase' } },
   },
   {
@@ -44,6 +49,15 @@ export const INTEGRATIONS: Integration[] = [
     id: 'figma',
     envVars: { accessToken: 'FIGMA_ACCESS_TOKEN' },
     implementation: { mcp: { package: 'mcp-server-figma', command: 'mcp-server-figma', args: [] } },
+  },
+  {
+    id: 'vercel',
+    envVars: {
+      token: 'VERCEL_TOKEN',          // vercel CLI auth — required
+      orgId: 'VERCEL_ORG_ID',         // optional: pin team without --scope
+      projectId: 'VERCEL_PROJECT_ID', // optional: pin project without linking
+    },
+    implementation: { cli: { bin: 'vercel' } },
   },
 ];
 

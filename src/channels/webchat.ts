@@ -8,12 +8,12 @@ const WEBCHAT_JID = 'admin@nanoclaw';
 export class WebchatChannel implements Channel {
   readonly name = 'webchat';
   /**
-   * Set by api-server immediately before enqueueing — consumed (shifted) by
-   * processGroupMessages at the start of each run. Kept separate from
-   * currentTraceId so that a new incoming webhook cannot overwrite the trace
-   * that is mid-flight in processGroupMessages.
+   * Queue of traceIds from incoming webhooks. Each webhook pushes its traceId
+   * here; processGroupMessages drains the queue and uses the last (most recent)
+   * entry as webchatTraceId for this run. Using a queue instead of a single
+   * slot ensures rapid back-to-back messages don't silently drop earlier IDs.
    */
-  incomingTraceId: string | null = null;
+  incomingTraceIds: string[] = [];
   /**
    * Set by processGroupMessages just before calling sendMessage; read
    * synchronously by sendMessage before its first await so no webhook

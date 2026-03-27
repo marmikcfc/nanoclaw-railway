@@ -212,12 +212,22 @@ const DEFAULT_SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']
 // These are secrets, but they must remain visible so that tools like
 // `gh`, `aws`, and `supabase` can authenticate.
 const CLI_PASSTHROUGH_VARS = new Set([
+  // GitHub
   'GH_TOKEN',
   'GITHUB_TOKEN',
+  // AWS
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY',
   'AWS_DEFAULT_REGION',
-  'SUPABASE_ACCESS_TOKEN',
+  // Supabase
+  'SUPABASE_ACCESS_TOKEN',   // management API (projects list, link)
+  'SUPABASE_URL',
+  'SUPABASE_DB_PASSWORD',    // direct postgres (inspect db, db execute, db dump)
+  'SUPABASE_SERVICE_KEY',    // REST API (optional)
+  // Vercel
+  'VERCEL_TOKEN',            // vercel CLI auth
+  'VERCEL_ORG_ID',           // optional: pin team without --scope
+  'VERCEL_PROJECT_ID',       // optional: pin project without linking
 ]);
 
 function createSanitizeBashHook(extraSecretKeys: string[] = []): HookCallback {
