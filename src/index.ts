@@ -189,7 +189,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
-  logger.info(
+  logger.debug(
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
@@ -624,16 +624,17 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
+  const recovering: string[] = [];
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
+      recovering.push(group.name);
       queue.enqueueMessageCheck(chatJid);
     }
+  }
+  if (recovering.length > 0) {
+    logger.info({ count: recovering.length, groups: recovering }, 'Recovery: queued groups with unprocessed messages');
   }
 }
 
@@ -753,7 +754,7 @@ async function main(): Promise<void> {
             requiresTrigger: !chatIsDM,
             isDM: chatIsDM || undefined,
           });
-          logger.info(
+          logger.debug(
             { jid: chatJid, name: chatName, isDM: chatIsDM },
             'Auto-registered chat on first message',
           );
@@ -949,7 +950,7 @@ async function main(): Promise<void> {
             requiresTrigger: !chatIsDM,
             isDM: chatIsDM || undefined,
           });
-          logger.info(
+          logger.debug(
             { jid: chat.jid, name: chat.name, folder: folderName, isDM: chatIsDM },
             'Auto-registered chat',
           );
