@@ -94,6 +94,9 @@ COPY CLAUDE.md ./
 # Set agent-runner path for railway-runner.ts
 ENV AGENT_RUNNER_PATH=/agent-runner-dist/index.js
 
+# Suppress Node.js deprecation warnings from transitive deps (e.g. punycode)
+ENV NODE_OPTIONS=--no-deprecation
+
 # Default volume mount path (Railway volumes)
 ENV RAILWAY_VOLUME_MOUNT_PATH=/data
 

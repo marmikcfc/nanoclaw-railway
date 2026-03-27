@@ -190,7 +190,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
-  logger.info(
+  logger.debug(
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
@@ -402,6 +402,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
       return true;
+    }
+    // Notify the user so they aren't left hanging, then roll back the cursor.
+    try {
+      await channel.sendMessage(chatJid, "Something went wrong and I couldn't complete that. Please try again.");
+    } catch (sendErr) {
+      logger.warn({ group: group.name, err: sendErr }, 'Failed to send error notification to user');
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
@@ -625,16 +631,17 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
+  const recovering: string[] = [];
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
+      recovering.push(group.name);
       queue.enqueueMessageCheck(chatJid);
     }
+  }
+  if (recovering.length > 0) {
+    logger.info({ count: recovering.length, groups: recovering }, 'Recovery: queued groups with unprocessed messages');
   }
 }
 
@@ -754,7 +761,7 @@ async function main(): Promise<void> {
             requiresTrigger: !chatIsDM,
             isDM: chatIsDM || undefined,
           });
-          logger.info(
+          logger.debug(
             { jid: chatJid, name: chatName, isDM: chatIsDM },
             'Auto-registered chat on first message',
           );
@@ -955,7 +962,7 @@ async function main(): Promise<void> {
             requiresTrigger: !chatIsDM,
             isDM: chatIsDM || undefined,
           });
-          logger.info(
+          logger.debug(
             { jid: chat.jid, name: chat.name, folder: folderName, isDM: chatIsDM },
             'Auto-registered chat',
           );
