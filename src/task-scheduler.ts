@@ -71,10 +71,11 @@ export function computeNextRun(task: ScheduledTask): string | null {
  */
 export async function reportScheduleHint(): Promise<void> {
   const cloudUrl = process.env.NANOCLAW_CLOUD_URL;
-  const tenantId = process.env.TENANT_ID;
+  const agentId = process.env.AGENT_ID;
+  const wsId = process.env.WORKSPACE_ID;
   const secret = process.env.NANOCLAW_EVENT_SECRET;
 
-  if (!cloudUrl || !tenantId || !secret) {
+  if (!cloudUrl || !agentId || !secret) {
     return; // local dev without cloud — skip silently
   }
 
@@ -83,7 +84,10 @@ export async function reportScheduleHint(): Promise<void> {
   const signature = createHmac('sha256', secret).update(body).digest('hex');
 
   try {
-    const res = await fetch(`${cloudUrl}/api/tasks/${tenantId}/schedule-hint`, {
+    const scheduleUrl = wsId
+      ? `${cloudUrl}/api/workspaces/${wsId}/agents/${agentId}/schedule-hint`
+      : `${cloudUrl}/api/tasks/${agentId}/schedule-hint`;
+    const res = await fetch(scheduleUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -93,7 +97,7 @@ export async function reportScheduleHint(): Promise<void> {
     });
     if (!res.ok) {
       logger.warn(
-        { tenantId, status: res.status },
+        { agentId, status: res.status },
         'reportScheduleHint: non-OK response from cloud',
       );
     }

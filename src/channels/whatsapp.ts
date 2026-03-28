@@ -60,9 +60,9 @@ export class WhatsAppChannel implements Channel {
   private async pushToCloud(payload: Record<string, string>): Promise<void> {
     const cloudUrl = process.env.NANOCLAW_CLOUD_URL;
     const eventSecret = process.env.NANOCLAW_EVENT_SECRET;
-    const tenantId = process.env.TENANT_ID;
+    const agentId = process.env.AGENT_ID;
 
-    if (!cloudUrl || !eventSecret || !tenantId) {
+    if (!cloudUrl || !eventSecret || !agentId) {
       logger.debug('Cloud relay not configured, skipping pairing push');
       return;
     }
@@ -71,7 +71,7 @@ export class WhatsAppChannel implements Channel {
     const body = JSON.stringify(payload);
     const signature = createHmac('sha256', eventSecret).update(body).digest('hex');
 
-    const url = `${cloudUrl}/api/pairing/${tenantId}`;
+    const url = `${cloudUrl}/api/pairing/${agentId}`;
     logger.info({ url, payload }, 'pushToCloud: sending pairing event');
     try {
       const resp = await fetch(url, {

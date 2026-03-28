@@ -34,25 +34,25 @@ export class WebchatChannel implements Channel {
 
   async sendMessage(_jid: string, text: string): Promise<void> {
     const cloudUrl = process.env.NANOCLAW_CLOUD_URL;
-    const tenantId = process.env.TENANT_ID;
+    const agentId = process.env.AGENT_ID;
     const secret = process.env.NANOCLAW_EVENT_SECRET;
 
-    if (!cloudUrl || !tenantId || !secret) {
-      logger.error('WebchatChannel: missing env vars (NANOCLAW_CLOUD_URL, TENANT_ID, NANOCLAW_EVENT_SECRET)');
+    if (!cloudUrl || !agentId || !secret) {
+      logger.error('WebchatChannel: missing env vars (NANOCLAW_CLOUD_URL, AGENT_ID, NANOCLAW_EVENT_SECRET)');
       return;
     }
 
     const event = {
       id: randomUUID(),
-      tenant_id: tenantId,
+      tenant_id: agentId,
       trace_id: this.currentTraceId ?? randomUUID(),
       parent_event_id: null,
       seq: 1,
       event_type: 'webchat_agent_message',
       status: 'complete',
       agent_name: 'agent',
-      channel: 'webchat',
-      data: { content: text },
+      channel: process.env.CHANNEL_TYPE ?? 'unknown',
+      data: { content: text, summary: '' },
       tokens_used: null,
       cost_usd: null,
       duration_ms: null,
@@ -63,7 +63,7 @@ export class WebchatChannel implements Channel {
     const signature = createHmac('sha256', secret).update(body).digest('hex');
 
     try {
-      const res = await fetch(`${cloudUrl}/api/events/${tenantId}`, {
+      const res = await fetch(`${cloudUrl}/api/events/${agentId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -37,7 +37,7 @@ function cloudHmac(secret: string, body: string): string {
 }
 
 async function createCloudTask(opts: {
-  tenantId: string;
+  agentId: string;
   cloudUrl: string;
   eventSecret: string;
   channel: string;
@@ -52,7 +52,7 @@ async function createCloudTask(opts: {
     chat_jid: opts.chatJid,
   });
   try {
-    const resp = await fetch(`${opts.cloudUrl}/api/tasks/${opts.tenantId}/create`, {
+    const resp = await fetch(`${opts.cloudUrl}/api/tasks/${opts.agentId}/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -70,7 +70,7 @@ async function createCloudTask(opts: {
 }
 
 async function patchCloudTask(opts: {
-  tenantId: string;
+  agentId: string;
   taskId: string;
   cloudUrl: string;
   eventSecret: string;
@@ -78,7 +78,7 @@ async function patchCloudTask(opts: {
 }): Promise<void> {
   const body = JSON.stringify({ status: opts.status });
   try {
-    await fetch(`${opts.cloudUrl}/api/tasks/${opts.tenantId}/${opts.taskId}`, {
+    await fetch(`${opts.cloudUrl}/api/tasks/${opts.agentId}/${opts.taskId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -220,14 +220,14 @@ export async function runRailwayAgent(
   // Create cloud task (fire-and-forget: proceed even if this fails)
   const cloudUrl = process.env.NANOCLAW_CLOUD_URL || '';
   const eventSecret = process.env.NANOCLAW_EVENT_SECRET || '';
-  const tenantId = process.env.TENANT_ID || '';
+  const agentId = process.env.AGENT_ID || '';
   const channel = input.channel || group.folder.split('_')[0] || 'unknown';
   const origin = input.isScheduledTask ? 'dashboard' : (input.origin || 'chat');
 
   let taskId: string | null = null;
-  if (cloudUrl && eventSecret && tenantId) {
+  if (cloudUrl && eventSecret && agentId) {
     taskId = await createCloudTask({
-      tenantId,
+      agentId,
       cloudUrl,
       eventSecret,
       channel,
@@ -259,7 +259,8 @@ export async function runRailwayAgent(
         RAILWAY_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT || '',
         // Cloud task context for artifact uploader
         TASK_ID: taskId || '',
-        TENANT_ID: tenantId,
+        AGENT_ID: agentId,
+        WORKSPACE_ID: process.env.WORKSPACE_ID || '',
         NANOCLAW_CLOUD_URL: cloudUrl,
         NANOCLAW_EVENT_SECRET: eventSecret,
         NANOCLAW_CHANNEL: channel,
@@ -466,8 +467,8 @@ export async function runRailwayAgent(
           'Railway agent exited with error',
         );
         // Patch cloud task to failed so it doesn't stay in_progress forever
-        if (taskId && cloudUrl && eventSecret && tenantId) {
-          patchCloudTask({ tenantId, taskId, cloudUrl, eventSecret, status: 'failed' }).catch(() => {});
+        if (taskId && cloudUrl && eventSecret && agentId) {
+          patchCloudTask({ agentId, taskId, cloudUrl, eventSecret, status: 'failed' }).catch(() => {});
         }
         resolve({
           status: 'error',
@@ -478,8 +479,8 @@ export async function runRailwayAgent(
       }
 
       // Patch cloud task to done (fire-and-forget)
-      if (taskId && cloudUrl && eventSecret && tenantId) {
-        patchCloudTask({ tenantId, taskId, cloudUrl, eventSecret, status: 'done' }).catch(() => {});
+      if (taskId && cloudUrl && eventSecret && agentId) {
+        patchCloudTask({ agentId, taskId, cloudUrl, eventSecret, status: 'done' }).catch(() => {});
       }
 
       if (onOutput) {

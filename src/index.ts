@@ -91,17 +91,17 @@ let allowedWhatsAppNumbers: Set<string> = new Set();
 
 async function fetchAllowedNumbers(): Promise<void> {
   const cloudUrl = process.env.NANOCLAW_CLOUD_URL;
-  const tenantId = process.env.TENANT_ID;
+  const agentId = process.env.AGENT_ID;
   const secret = process.env.NANOCLAW_EVENT_SECRET;
-  if (!cloudUrl || !tenantId || !secret) return;
+  if (!cloudUrl || !agentId || !secret) return;
 
   const signature = crypto
     .createHmac('sha256', secret)
-    .update(tenantId)
+    .update(agentId)
     .digest('hex');
 
   try {
-    const res = await fetch(`${cloudUrl}/api/provision/${tenantId}/allowed-numbers`, {
+    const res = await fetch(`${cloudUrl}/api/provision/${agentId}/allowed-numbers`, {
       headers: { 'x-signature': signature },
     });
     if (res.ok) {
