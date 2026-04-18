@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# x-search — Twitter/X search via xAI Grok Responses API
+# Uses curl + jq against api.x.ai/v1/responses with x_search tool.
+# Requires: XAI_API_KEY
+
+set -euo pipefail
+
+API="https://api.x.ai/v1/responses"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+[ -z "${XAI_API_KEY:-}" ] && die "XAI_API_KEY not set"
+
+auth=(-H "Authorization: Bearer $XAI_API_KEY" -H "Content-Type: application/json")
+
+# Build the x_search tool JSON with optional parameters
+build_tool_json() {
+  local handles_include="${1:-}" handles_exclude="${2:-}" from_date="${3:-}" to_date="${4:-}"
+  local tool='{"type":"x_search"'
+
+  if [ -n "$handles_include" ]; then
+    local arr
+    arr=$(echo "$handles_include" | jq -R 'split(",") | map(select(. != ""))')
+    tool="$tool,\"allowed_x_handles\":$arr"
+  fi
+  if [ -n "$handles_exclude" ]; then
+    local arr
+    arr=$(echo "$handles_exclude" | jq -R 'split(",") | map(select(. != ""))')
+    tool="$tool,\"excluded_x_handles\":$arr"
+  fi
+  if [ -n "$from_date" ]; then
+    tool="$tool,\"from_date\":\"$from_date\""
+  fi
+  if [ -n "$to_date" ]; then
+    tool="$tool,\"to_date\":\"$to_date\""
+  fi
+
+  tool="$tool}"
+  echo "$tool"
+}
+
+# ── query ─────────────────────────────────────────────────────────
+cmd_query() {
+  local query="" handles="" exclude="" from_date="" to_date=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --handles)  handles="$2"; shift 2 ;;
+      --exclude)  exclude="$2"; shift 2 ;;
+      --from)     from_date="$2"; shift 2 ;;
+      --to)       to_date="$2"; shift 2 ;;
+      *) query="$1"; shift ;;
+    esac
+  done
+  [ -z "$query" ] && die "usage: x-search query \"search terms\" [--handles user1,user2] [--exclude bot1] [--from 2026-04-01] [--to 2026-04-05]"
+
+  local tool_json
+  tool_json=$(build_tool_json "$handles" "$exclude" "$from_date" "$to_date")
+
+  local body
+  body=$(jq -n \
+    --arg model "grok-3-mini" \
+    --arg query "$query" \
+    --argjson tool "$tool_json" \
+    '{model: $model, tools: [$tool], input: $query}')
+
+  local response
+  response=$(curl -s -X POST "$API" "${auth[@]}" -d "$body") || die "HTTP request failed"
+
+  # Extract text output and citations
+  echo "$response" | jq '{
+    text: [.output[] | select(.type == "text") | .text] | join("\n"),
+    citations: [.output[] | select(.type == "text") | .annotations[]? | select(.type == "url_citation") | {title, url}]
+  }'
+}
+
+# ── user ──────────────────────────────────────────────────────────
+cmd_user() {
+  local username="${1:-}"
+  [ -z "$username" ] && die "usage: x-search user <username>"
+
+  cmd_query "Tell me about X user @$username — their recent posts, bio, and activity"
+}
+
+# ── thread ────────────────────────────────────────────────────────
+cmd_thread() {
+  local url="${1:-}"
+  [ -z "$url" ] && die "usage: x-search thread <tweet-url>"
+
+  cmd_query "Fetch and summarize this tweet thread: $url"
+}
+
+# ── main ──────────────────────────────────────────────────────────
+case "${1:-}" in
+  query)   shift; cmd_query "$@" ;;
+  user)    shift; cmd_user "$@" ;;
+  thread)  shift; cmd_thread "$@" ;;
+  *)
+    cat <<'USAGE'
+x-search — Twitter/X search via Grok
+
+Commands:
+  query   "search terms" [--handles h1,h2] [--exclude e1] [--from DATE] [--to DATE]
+  user    <username>                    Look up a user's profile and recent activity
+  thread  <tweet-url>                   Fetch and summarize a tweet thread
+
+Options:
+  --handles   Comma-separated X handles to restrict results to (max 10)
+  --exclude   Comma-separated X handles to exclude (max 10)
+  --from      Start date (ISO8601, e.g. 2026-04-01)
+  --to        End date (ISO8601, e.g. 2026-04-05)
+
+Environment:
+  XAI_API_KEY   (required) xAI API key
+USAGE
+    exit 1
+    ;;
+esac

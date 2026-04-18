@@ -1,0 +1,641 @@
+import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
+import makeWASocket, {
+  Browsers,
+  DisconnectReason,
+  WASocket,
+  downloadMediaMessage,
+  fetchLatestWaWebVersion,
+  makeCacheableSignalKeyStore,
+  normalizeMessageContent,
+  useMultiFileAuthState,
+} from '@whiskeysockets/baileys';
+
+import {
+  ASSISTANT_HAS_OWN_NUMBER,
+  ASSISTANT_NAME,
+  IS_RAILWAY,
+  STORE_DIR,
+} from '../config.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import { logger } from '../logger.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
+import { downloadBuffer, processImage, processPdf, processAttachment, ProcessedAttachment } from '../media.js';
+import { registerChannel, ChannelOpts } from './registry.js';
+
+const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export interface WhatsAppChannelOpts {
+  onMessage: OnInboundMessage;
+  onChatMetadata: OnChatMetadata;
+  registeredGroups: () => Record<string, RegisteredGroup>;
+}
+
+export class WhatsAppChannel implements Channel {
+  name = 'whatsapp';
+
+  private sock!: WASocket;
+  private connected = false;
+  private lidToPhoneMap: Record<string, string> = {};
+  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private flushing = false;
+  private groupSyncTimerStarted = false;
+  private pairingRequested = false;
+  private hasBeenConnected = false;
+  private intentionalDisconnect = false;
+
+  private opts: WhatsAppChannelOpts;
+
+  constructor(opts: WhatsAppChannelOpts) {
+    this.opts = opts;
+  }
+
+  private async pushToCloud(payload: Record<string, string>): Promise<void> {
+    const cloudUrl = process.env.PEPPER_CLOUD_URL;
+    const eventSecret = process.env.PEPPER_EVENT_SECRET;
+    const agentId = process.env.AGENT_ID;
+
+    if (!cloudUrl || !eventSecret || !agentId) {
+      logger.debug('Cloud relay not configured, skipping pairing push');
+      return;
+    }
+
+    const { createHmac } = await import('crypto');
+    const body = JSON.stringify(payload);
+    const signature = createHmac('sha256', eventSecret).update(body).digest('hex');
+
+    const url = `${cloudUrl}/api/pairing/${agentId}`;
+    logger.info({ url, payload }, 'pushToCloud: sending pairing event');
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Event-Signature': signature,
+        },
+        body,
+        signal: AbortSignal.timeout(10000),
+      });
+      logger.info({ status: resp.status, ok: resp.ok }, 'pushToCloud: response received');
+      if (!resp.ok) {
+        logger.warn({ status: resp.status }, 'Failed to push pairing status to cloud');
+      }
+    } catch (err) {
+      logger.error({ err }, 'pushToCloud: request failed');
+    }
+  }
+
+  async connect(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.connectInternal(resolve).catch(reject);
+    });
+  }
+
+  private async connectInternal(onFirstOpen?: () => void): Promise<void> {
+    // Clear flag so events on the NEW socket aren't swallowed by a stale flag
+    // from a previous refreshPairing() whose disconnect() was a no-op.
+    this.intentionalDisconnect = false;
+
+    const authDir = path.join(STORE_DIR, 'auth');
+    fs.mkdirSync(authDir, { recursive: true });
+
+    let { state, saveCreds } = await useMultiFileAuthState(authDir);
+
+    // On Railway, if creds exist but aren't registered (leftover from failed pairing),
+    // clear them to avoid a passive login attempt that will 401 immediately.
+    if (IS_RAILWAY && process.env.WHATSAPP_PHONE && !state.creds.registered && state.creds.me) {
+      logger.info('Clearing stale auth from previous failed pairing attempt');
+      try { fs.rmSync(authDir, { recursive: true, force: true }); } catch {}
+      fs.mkdirSync(authDir, { recursive: true });
+      ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+    }
+
+    const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
+      logger.warn(
+        { err },
+        'Failed to fetch latest WA Web version, using default',
+      );
+      return { version: undefined };
+    });
+    this.sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      printQRInTerminal: false,
+      logger,
+      browser: Browsers.macOS('Chrome'),
+    });
+
+    // Railway auto-pairing: request pairing code when WHATSAPP_PHONE is set
+    const whatsappPhone = process.env.WHATSAPP_PHONE;
+    if (IS_RAILWAY && whatsappPhone && !state.creds.registered && !this.pairingRequested) {
+      this.pairingRequested = true;
+      setTimeout(async () => {
+        try {
+          // Strip leading + for Baileys
+          const phone = whatsappPhone.replace(/^\+/, '');
+          const code = await this.sock.requestPairingCode(phone);
+          logger.info(
+            { code },
+            `WhatsApp pairing code: ${code} — enter this in WhatsApp > Linked Devices > Link with phone number`,
+          );
+          // Push pairing code to cloud dashboard
+          this.pushToCloud({ pairingCode: code });
+        } catch (err) {
+          logger.error({ err }, 'Failed to request pairing code');
+        }
+      }, 3000);
+    }
+
+    this.sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        // On Railway, don't exit — pairing code was already requested above
+        if (IS_RAILWAY) {
+          logger.info(
+            'QR received, waiting for pairing code authentication...',
+          );
+          return;
+        }
+        const msg =
+          'WhatsApp authentication required. Run /setup in Claude Code.';
+        logger.error(msg);
+        exec(
+          `osascript -e 'display notification "${msg}" with title "Pepper" sound name "Basso"'`,
+        );
+        setTimeout(() => process.exit(1), 1000);
+      }
+
+      if (connection === 'close') {
+        this.connected = false;
+
+        // If disconnect was intentional (e.g. refreshPairing), skip all reconnect logic
+        if (this.intentionalDisconnect) {
+          this.intentionalDisconnect = false;
+          logger.info('Intentional disconnect — skipping reconnect');
+          return;
+        }
+
+        const reason = (
+          lastDisconnect?.error as { output?: { statusCode?: number } }
+        )?.output?.statusCode;
+        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'Connection closed',
+        );
+
+        // During initial pairing (code requested, not yet connected),
+        // check whether pairing actually succeeded before giving up.
+        // WhatsApp sends a 515 "restart required" after successful pairing —
+        // this is normal and we must reconnect to complete the handshake.
+        if (IS_RAILWAY && this.pairingRequested && !this.hasBeenConnected) {
+          if (state.creds.registered || state.creds.me) {
+            // Pairing succeeded — the 515 is a normal post-pairing restart.
+            // Reset flag and fall through to reconnect logic below.
+            logger.info('Pairing succeeded (post-pairing restart). Reconnecting...');
+            this.pairingRequested = false;
+          } else {
+            // Genuine failure — stop and wait for user to click "Get New Code".
+            // This prevents burning through codes and hitting WhatsApp rate limits.
+            logger.info('Pairing code expired or rejected. Waiting for user to request a new code.');
+            this.pushToCloud({ status: 'code_expired' });
+            if (reason === DisconnectReason.loggedOut) {
+              // Clear stale auth from failed pairing attempt
+              const authDir = path.join(STORE_DIR, 'auth');
+              try { fs.rmSync(authDir, { recursive: true, force: true }); } catch {}
+              this.pairingRequested = false;
+            }
+            onFirstOpen?.();
+            onFirstOpen = undefined;
+            return;
+          }
+        }
+
+        if (shouldReconnect) {
+          logger.info('Reconnecting...');
+          this.connectInternal().catch((err) => {
+            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
+            setTimeout(() => {
+              this.connectInternal().catch((err2) => {
+                logger.error({ err: err2 }, 'Reconnection retry failed');
+              });
+            }, 5000);
+          });
+        } else {
+          if (IS_RAILWAY && process.env.WHATSAPP_PHONE) {
+            // Clear stale auth — user must click "Get New Code" to retry
+            logger.info(
+              'Logged out on Railway. Clearing auth state.',
+            );
+            this.pairingRequested = false;
+            const authDir = path.join(STORE_DIR, 'auth');
+            try {
+              fs.rmSync(authDir, { recursive: true, force: true });
+            } catch {}
+            this.pushToCloud({ status: 'code_expired' });
+            onFirstOpen?.();
+            onFirstOpen = undefined;
+          } else if (IS_RAILWAY) {
+            logger.info('Logged out. Set WHATSAPP_PHONE to re-authenticate.');
+            onFirstOpen?.();
+          } else {
+            logger.info('Logged out. Run /setup to re-authenticate.');
+            process.exit(0);
+          }
+        }
+      } else if (connection === 'open') {
+        this.connected = true;
+        this.hasBeenConnected = true;
+        logger.info('Connected to WhatsApp');
+        // Notify cloud dashboard of successful connection
+        this.pushToCloud({ status: 'connected' });
+
+        // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
+        this.sock.sendPresenceUpdate('available').catch((err) => {
+          logger.warn({ err }, 'Failed to send presence update');
+        });
+
+        // Build LID to phone mapping from auth state for self-chat translation
+        if (this.sock.user) {
+          const phoneUser = this.sock.user.id.split(':')[0];
+          const lidUser = this.sock.user.lid?.split(':')[0];
+          if (lidUser && phoneUser) {
+            this.lidToPhoneMap[lidUser] = `${phoneUser}@s.whatsapp.net`;
+            logger.debug({ lidUser, phoneUser }, 'LID to phone mapping set');
+          }
+        }
+
+        // Flush any messages queued while disconnected
+        this.flushOutgoingQueue().catch((err) =>
+          logger.error({ err }, 'Failed to flush outgoing queue'),
+        );
+
+        // Sync group metadata on startup (respects 24h cache)
+        this.syncGroupMetadata().catch((err) =>
+          logger.error({ err }, 'Initial group sync failed'),
+        );
+        // Set up daily sync timer (only once)
+        if (!this.groupSyncTimerStarted) {
+          this.groupSyncTimerStarted = true;
+          setInterval(() => {
+            this.syncGroupMetadata().catch((err) =>
+              logger.error({ err }, 'Periodic group sync failed'),
+            );
+          }, GROUP_SYNC_INTERVAL_MS);
+        }
+
+        // Signal first connection to caller
+        if (onFirstOpen) {
+          onFirstOpen();
+          onFirstOpen = undefined;
+        }
+      }
+    });
+
+    this.sock.ev.on('creds.update', saveCreds);
+
+    this.sock.ev.on('messages.upsert', async ({ messages }) => {
+      for (const msg of messages) {
+        if (!msg.message) continue;
+        // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
+        // editedMessage, etc.) so that conversation, extendedTextMessage,
+        // imageMessage, etc. are accessible at the top level.
+        const normalized = normalizeMessageContent(msg.message);
+        if (!normalized) continue;
+        const rawJid = msg.key.remoteJid;
+        if (!rawJid || rawJid === 'status@broadcast') continue;
+
+        // Translate LID JID to phone JID if applicable
+        const chatJid = await this.translateJid(rawJid);
+
+        const timestamp = new Date(
+          Number(msg.messageTimestamp) * 1000,
+        ).toISOString();
+
+        // Always notify about chat metadata for group discovery
+        const isGroup = chatJid.endsWith('@g.us');
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'whatsapp',
+          isGroup,
+        );
+
+        let content =
+          normalized.conversation ||
+          normalized.extendedTextMessage?.text ||
+          normalized.imageMessage?.caption ||
+          normalized.videoMessage?.caption ||
+          '';
+
+        // Download and process image/document attachments
+        const attachments: ProcessedAttachment[] = [];
+
+        if (normalized.imageMessage) {
+          try {
+            const buffer = await downloadMediaMessage(
+              { key: msg.key, message: normalized },
+              'buffer',
+              {},
+            ) as Buffer;
+            const mimeType = normalized.imageMessage.mimetype || 'image/jpeg';
+            attachments.push(await processImage(buffer, mimeType));
+            if (!content) content = '[Image]';
+          } catch (err) {
+            logger.warn({ err }, 'WhatsApp: failed to process image, using placeholder');
+            if (!content) content = '[Image]';
+          }
+        } else if (normalized.documentMessage) {
+          const mimeType = normalized.documentMessage.mimetype || 'application/octet-stream';
+          const filename = normalized.documentMessage.fileName ?? undefined;
+          if (!mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
+            try {
+              const buffer = await downloadMediaMessage(
+                { key: msg.key, message: normalized },
+                'buffer',
+                {},
+              ) as Buffer;
+              const processed = await processAttachment(buffer, mimeType, filename);
+              if (processed) {
+                attachments.push(processed);
+                this.uploadToCloud(buffer, filename || 'document', mimeType, 'whatsapp')
+                  .catch(err => logger.warn({ err, filename }, 'WhatsApp: failed to upload document to cloud'));
+              }
+              if (!content) {
+                if (mimeType === 'application/pdf') {
+                  content = `[PDF: ${filename || 'document.pdf'}]`;
+                } else {
+                  content = `[File: ${filename || 'document'}]`;
+                }
+              }
+            } catch (err) {
+              logger.warn({ err }, 'WhatsApp: failed to process document, using placeholder');
+              if (!content) {
+                if (mimeType === 'application/pdf') {
+                  content = `[PDF: ${filename || 'document.pdf'}]`;
+                } else {
+                  content = `[File: ${filename || 'document'}]`;
+                }
+              }
+            }
+          } else {
+            if (!content) content = `[${mimeType.startsWith('video/') ? 'Video' : 'Audio'}: ${filename || 'media'}]`;
+          }
+        }
+
+        // Skip protocol messages with no text content and no media (encryption keys, read receipts, etc.)
+        if (!content) continue;
+
+        const sender = msg.key.participant || msg.key.remoteJid || '';
+        const senderName = msg.pushName || sender.split('@')[0];
+
+        const fromMe = msg.key.fromMe || false;
+        // Detect bot messages: with own number, fromMe is reliable
+        // since only the bot sends from that number.
+        // With shared number, bot messages carry the assistant name prefix
+        // (even in DMs/self-chat) so we check for that.
+        const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
+          ? fromMe
+          : content.startsWith(`${ASSISTANT_NAME}:`);
+
+        this.opts.onMessage(chatJid, {
+          id: msg.key.id || '',
+          chat_jid: chatJid,
+          sender,
+          sender_name: senderName,
+          content,
+          timestamp,
+          is_from_me: fromMe,
+          is_bot_message: isBotMessage,
+          attachments: attachments.length ? attachments : undefined,
+        });
+      }
+    });
+  }
+
+  private async uploadToCloud(buffer: Buffer, filename: string, mimeType: string, source: string): Promise<void> {
+    const cloudUrl = process.env.PEPPER_CLOUD_URL;
+    const agentId = process.env.AGENT_ID;
+    const secret = process.env.PEPPER_EVENT_SECRET;
+    if (!cloudUrl || !agentId || !secret) return;
+
+    const body = JSON.stringify({
+      filename,
+      mimeType,
+      sizeBytes: buffer.length,
+      source,
+      data: buffer.toString('base64'),
+    });
+
+    const { createHmac } = await import('crypto');
+    const signature = createHmac('sha256', secret).update(body).digest('hex');
+
+    await fetch(`${cloudUrl}/api/artifacts/${agentId}/upload-external`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Event-Signature': signature,
+      },
+      body,
+      signal: AbortSignal.timeout(30_000),
+    });
+  }
+
+  async sendMessage(jid: string, text: string): Promise<void> {
+    // Prefix bot messages with assistant name so users know who's speaking.
+    // On a shared number, prefix is also needed in DMs (including self-chat)
+    // to distinguish bot output from user messages.
+    // Skip only when the assistant has its own dedicated phone number.
+    const prefixed = ASSISTANT_HAS_OWN_NUMBER
+      ? text
+      : `${ASSISTANT_NAME}: ${text}`;
+
+    if (!this.connected) {
+      this.outgoingQueue.push({ jid, text: prefixed });
+      logger.info(
+        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
+      return;
+    }
+    try {
+      await this.sock.sendMessage(jid, { text: prefixed });
+      logger.info({ jid, length: prefixed.length }, 'Message sent');
+    } catch (err) {
+      // If send fails, queue it for retry on reconnect
+      this.outgoingQueue.push({ jid, text: prefixed });
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send, message queued',
+      );
+    }
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  getConnectedPhone(): string | undefined {
+    return this.sock?.user?.id?.split(':')[0];
+  }
+
+  ownsJid(jid: string): boolean {
+    return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+  }
+
+  async disconnect(): Promise<void> {
+    this.connected = false;
+    this.sock?.end(undefined);
+  }
+
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    try {
+      const status = isTyping ? 'composing' : 'paused';
+      logger.debug({ jid, status }, 'Sending presence update');
+      await this.sock.sendPresenceUpdate(status, jid);
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to update typing status');
+    }
+  }
+
+  async syncGroups(force: boolean): Promise<void> {
+    return this.syncGroupMetadata(force);
+  }
+
+  async refreshPairing(): Promise<void> {
+    if (!process.env.WHATSAPP_PHONE) {
+      throw new Error('WHATSAPP_PHONE not configured');
+    }
+    logger.info('Refreshing WhatsApp pairing code...');
+    this.pairingRequested = false;
+    this.hasBeenConnected = false;
+    this.intentionalDisconnect = true;
+    await this.disconnect();
+    // Clear stale auth to avoid passive login → 401 cycle
+    const authDir = path.join(STORE_DIR, 'auth');
+    try { fs.rmSync(authDir, { recursive: true, force: true }); } catch {}
+    await this.connect();
+  }
+
+  /**
+   * Sync group metadata from WhatsApp.
+   * Fetches all participating groups and stores their names in the database.
+   * Called on startup, daily, and on-demand via IPC.
+   */
+  async syncGroupMetadata(force = false): Promise<void> {
+    if (!force) {
+      const lastSync = getLastGroupSync();
+      if (lastSync) {
+        const lastSyncTime = new Date(lastSync).getTime();
+        if (Date.now() - lastSyncTime < GROUP_SYNC_INTERVAL_MS) {
+          logger.debug({ lastSync }, 'Skipping group sync - synced recently');
+          return;
+        }
+      }
+    }
+
+    try {
+      logger.info('Syncing group metadata from WhatsApp...');
+      const groups = await this.sock.groupFetchAllParticipating();
+
+      let count = 0;
+      for (const [jid, metadata] of Object.entries(groups)) {
+        if (metadata.subject) {
+          updateChatName(jid, metadata.subject);
+          count++;
+        }
+      }
+
+      setLastGroupSync();
+      logger.info({ count }, 'Group metadata synced');
+    } catch (err) {
+      logger.error({ err }, 'Failed to sync group metadata');
+    }
+  }
+
+  private async translateJid(jid: string): Promise<string> {
+    if (!jid.endsWith('@lid')) return jid;
+    const lidUser = jid.split('@')[0].split(':')[0];
+
+    // Check local cache first
+    const cached = this.lidToPhoneMap[lidUser];
+    if (cached) {
+      logger.debug(
+        { lidJid: jid, phoneJid: cached },
+        'Translated LID to phone JID (cached)',
+      );
+      return cached;
+    }
+
+    // Query Baileys' signal repository for the mapping
+    try {
+      const pn = await this.sock.signalRepository?.lidMapping?.getPNForLID(jid);
+      if (pn) {
+        const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
+        this.lidToPhoneMap[lidUser] = phoneJid;
+        logger.info(
+          { lidJid: jid, phoneJid },
+          'Translated LID to phone JID (signalRepository)',
+        );
+        return phoneJid;
+      }
+    } catch (err) {
+      logger.debug({ err, jid }, 'Failed to resolve LID via signalRepository');
+    }
+
+    return jid;
+  }
+
+  private async flushOutgoingQueue(): Promise<void> {
+    if (this.flushing || this.outgoingQueue.length === 0) return;
+    this.flushing = true;
+    try {
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
+      while (this.outgoingQueue.length > 0) {
+        const item = this.outgoingQueue.shift()!;
+        // Send directly — queued items are already prefixed by sendMessage
+        await this.sock.sendMessage(item.jid, { text: item.text });
+        logger.info(
+          { jid: item.jid, length: item.text.length },
+          'Queued message sent',
+        );
+      }
+    } finally {
+      this.flushing = false;
+    }
+  }
+}
+
+registerChannel('whatsapp', (opts: ChannelOpts) => {
+  const authDir = path.join(STORE_DIR, 'auth');
+  const hasAuthState = fs.existsSync(path.join(authDir, 'creds.json'));
+  const hasPhone = !!process.env.WHATSAPP_PHONE;
+
+  // On Railway, skip if there's no existing auth and no phone for pairing.
+  // Locally, QR code auth is interactive so always allow.
+  if (IS_RAILWAY && !hasAuthState && !hasPhone) {
+    logger.warn('WhatsApp: WHATSAPP_PHONE not set and no existing auth state');
+    return null;
+  }
+
+  return new WhatsAppChannel(opts);
+});

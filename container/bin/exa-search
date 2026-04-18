@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# exa-search — Exa API CLI wrapper for structured web search
+# Usage: exa-search <query> [--domain d1,d2] [--since DATE] [--limit N] [--summary]
+set -euo pipefail
+
+[ -z "${EXA_API_KEY:-}" ] && { echo '{"error":"EXA_API_KEY not set. Add it in Railway service config."}'; exit 1; }
+
+usage() {
+  cat <<EOF
+Usage: exa-search <query> [options]
+
+Options:
+  --domain d1,d2   Filter by domains (e.g., reddit.com,producthunt.com)
+  --since DATE     Only results after this date (ISO8601, e.g., 2025-01-01)
+  --limit N        Number of results (default: 10)
+  --summary        Include full summaries (default: highlights only)
+  --help           Show this help
+
+Examples:
+  exa-search "voice AI communities" --domain reddit.com
+  exa-search "AI agent infrastructure" --domain reddit.com,producthunt.com
+  exa-search "voice AI market size 2026" --since 2025-01-01 --summary
+  exa-search "Retell AI reviews" --domain g2.com --limit 5
+EOF
+  exit 0
+}
+
+query="" domains="" since="" limit=10 summary=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --domain)  domains="$2"; shift 2 ;;
+    --since)   since="$2"; shift 2 ;;
+    --limit)   limit="$2"; shift 2 ;;
+    --summary) summary=true; shift ;;
+    --help|-h) usage ;;
+    *)         query="$1"; shift ;;
+  esac
+done
+
+[ -z "$query" ] && usage
+
+# Build JSON body
+body=$(jq -n \
+  --arg q "$query" \
+  --argjson n "$limit" \
+  '{query: $q, numResults: $n, type: "auto"}')
+
+# Add includeDomains if specified
+if [ -n "$domains" ]; then
+  arr=$(echo "$domains" | jq -R 'split(",") | map(select(. != ""))')
+  body=$(echo "$body" | jq --argjson d "$arr" '. + {includeDomains: $d}')
+fi
+
+# Add date filter
+if [ -n "$since" ]; then
+  body=$(echo "$body" | jq --arg d "$since" '. + {startPublishedDate: $d}')
+fi
+
+# Add contents config
+if [ "$summary" = true ]; then
+  body=$(echo "$body" | jq '. + {contents: {highlights: {maxCharacters: 3000}, summary: true}}')
+else
+  body=$(echo "$body" | jq '. + {contents: {highlights: {maxCharacters: 2000}}}')
+fi
+
+# Execute search and format output
+response=$(curl -sf --max-time 30 -X POST https://api.exa.ai/search \
+  -H "content-type: application/json" \
+  -H "x-api-key: $EXA_API_KEY" \
+  -d "$body" 2>/dev/null) || { echo '{"error":"Exa API request failed. Check EXA_API_KEY and network."}'; exit 1; }
+
+# Format clean output
+echo "$response" | jq '{
+  query: .query,
+  results: [.results[] | {
+    title: .title,
+    url: .url,
+    published: .publishedDate,
+    highlights: (.highlights // []),
+    summary: (.summary // null)
+  }]
+}'

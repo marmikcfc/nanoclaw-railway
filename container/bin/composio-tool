@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# composio-tool — lightweight Composio API wrapper for Pepper agents
+# Uses curl + jq against the Composio V3 REST API.
+# Requires: COMPOSIO_API_KEY, COMPOSIO_USER_ID
+
+set -euo pipefail
+
+API="${COMPOSIO_BASE_URL:-https://backend.composio.dev}/api/v3"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+[ -z "${COMPOSIO_API_KEY:-}" ] && die "COMPOSIO_API_KEY not set"
+
+auth=(-H "x-api-key: $COMPOSIO_API_KEY")
+
+# Helper: make API call, check for errors in response
+api() {
+  local response
+  response=$(curl -s "$@") || die "HTTP request failed"
+  if echo "$response" | jq -e '.error' >/dev/null 2>&1; then
+    echo "$response" | jq -r '.error | "error: \(.message // "unknown")\(.suggested_fix // "" | if . != "" then " — \(.)" else "" end)"' >&2
+    return 1
+  fi
+  echo "$response"
+}
+
+# ── search ─────────────────────────────────────────────────────────
+cmd_search() {
+  local query="" toolkit="" limit="10"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --toolkit) toolkit="$2"; shift 2 ;;
+      --limit)   limit="$2"; shift 2 ;;
+      *) query="$1"; shift ;;
+    esac
+  done
+  [ -z "$query" ] && die "usage: composio-tool search \"query\" [--toolkit name] [--limit N]"
+
+  local url="$API/tools?query=$(printf %s "$query" | jq -sRr @uri)&limit=$limit"
+  [ -n "$toolkit" ] && url="$url&toolkit_slug=$toolkit"
+
+  api "$url" "${auth[@]}" | jq '[.items[] | {slug, name, description, toolkit: .toolkit.slug}]'
+}
+
+# ── tools ──────────────────────────────────────────────────────────
+cmd_tools() {
+  local toolkit="" limit="100"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --limit) limit="$2"; shift 2 ;;
+      *) toolkit="$1"; shift ;;
+    esac
+  done
+  [ -z "$toolkit" ] && die "usage: composio-tool tools <toolkit> [--limit N]  (e.g. hubspot, gmail)"
+
+  api "$API/tools?toolkit_slug=$toolkit&limit=$limit" "${auth[@]}" \
+    | jq '[.items[] | {slug, name, description}]'
+}
+
+# ── schema ─────────────────────────────────────────────────────────
+cmd_schema() {
+  local slug="${1:-}"
+  [ -z "$slug" ] && die "usage: composio-tool schema <TOOL_SLUG>"
+
+  api "$API/tools?tool_slugs=$slug" "${auth[@]}" \
+    | jq '.items[0] | {slug, name, description, input_parameters}'
+}
+
+# ── execute ────────────────────────────────────────────────────────
+cmd_execute() {
+  local slug="${1:-}" data="${2:-\{\}}"
+  [ -z "$slug" ] && die "usage: composio-tool execute <TOOL_SLUG> '{\"key\":\"val\"}'"
+
+  [ -z "${COMPOSIO_USER_ID:-}" ] && die "COMPOSIO_USER_ID not set — cannot execute tools"
+
+  local body
+  body=$(jq -n --arg uid "$COMPOSIO_USER_ID" --argjson args "$data" \
+    '{user_id: $uid, arguments: $args}')
+
+  api -X POST "$API/tools/execute/$slug" \
+    "${auth[@]}" \
+    -H "Content-Type: application/json" \
+    -d "$body" | jq '.'
+}
+
+# ── apps ───────────────────────────────────────────────────────────
+cmd_apps() {
+  [ -z "${COMPOSIO_USER_ID:-}" ] && die "COMPOSIO_USER_ID not set"
+
+  api "$API/connected_accounts?user_ids=$COMPOSIO_USER_ID&statuses=ACTIVE" "${auth[@]}" \
+    | jq '[.items[] | {id, toolkit: .toolkit.slug, status}]'
+}
+
+# ── main ───────────────────────────────────────────────────────────
+case "${1:-}" in
+  search)  shift; cmd_search "$@" ;;
+  tools)   shift; cmd_tools "$@" ;;
+  schema)  shift; cmd_schema "$@" ;;
+  execute) shift; cmd_execute "$@" ;;
+  apps)    shift; cmd_apps "$@" ;;
+  *)
+    cat <<'USAGE'
+composio-tool — Composio API wrapper
+
+Commands:
+  search  "query" [--toolkit name] [--limit N]  Search for tools (default 10)
+  tools   <toolkit> [--limit N]                List all tools for a toolkit (default 100)
+  schema  <TOOL_SLUG>               Get input parameters for a tool
+  execute <TOOL_SLUG> '{"..."}'     Execute a tool
+  apps                               List connected apps
+
+Environment:
+  COMPOSIO_API_KEY    (required) API key
+  COMPOSIO_USER_ID   (required for execute/apps) User ID
+USAGE
+    exit 1
+    ;;
+esac
