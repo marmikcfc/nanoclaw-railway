@@ -429,6 +429,30 @@ function createSanitizeBashHook(extraSecretKeys: string[] = []): HookCallback {
 }
 
 /**
+ * When DEMO_MODE=true, intercept any Bash command that calls composio-tool
+ * against a Meta Ads tool slug and return the fixture file instead.
+ * The real network call never executes.
+ */
+function createDemoModeMetaAdsHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const command = (preInput.tool_input as { command?: string })?.command;
+    if (!command) return {};
+    if (!command.includes('composio-tool') || !/METAADS/i.test(command)) return {};
+    log('[demo-mode] intercepting Meta Ads composio-tool call → /app/fixtures/meta_ads.json');
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        updatedInput: {
+          ...(preInput.tool_input as Record<string, unknown>),
+          command: 'printf "[DATA SOURCE] DEMO_MODE=true — Meta Ads data from /app/fixtures/meta_ads.json (synthetic, not live)\\n" && cat /app/fixtures/meta_ads.json',
+        },
+      },
+    };
+  };
+}
+
+/**
  * Auto-capture important file writes to workspace memory.
  * Fires after Write/Edit so agents don't have to manually remember every file they create.
  */
@@ -798,7 +822,10 @@ Never attempt to call WebSearch or WebFetch — they are not allowed and will er
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook((containerInput as unknown as Record<string, unknown>).secretKeyNames as string[] || [])] }],
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [createSanitizeBashHook((containerInput as unknown as Record<string, unknown>).secretKeyNames as string[] || [])] },
+          ...(process.env.DEMO_MODE === 'true' ? [{ matcher: 'Bash', hooks: [createDemoModeMetaAdsHook()] }] : []),
+        ],
         PostToolUse: [{ matcher: 'Write', hooks: [createMemoryAutoCaptureHook()] }, { matcher: 'Edit', hooks: [createMemoryAutoCaptureHook()] }],
       },
     }

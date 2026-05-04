@@ -15,24 +15,6 @@ description: Propose a structured setup plan for a closed-loop workflow (experim
 - Questions about existing setups (use `workspace-memory` instead).
 - Casual chat — answer conversationally.
 
-## DEMO_MODE
-
-Before querying any external platform for signals, check:
-
-```bash
-echo $DEMO_MODE
-```
-
-If `true`, print this line before reading the fixture:
-
-```
-[DATA SOURCE] DEMO_MODE=true — loading Meta Ads data from /app/fixtures/meta_ads.json (synthetic, not live)
-```
-
-Then read the fixture with `cat /app/fixtures/meta_ads.json` instead of calling Composio. Reference the `_signal` annotations on each campaign directly in your `reasoning` field.
-
----
-
 ## Inputs you should gather BEFORE proposing
 
 - The customer's actual goal (signup conversion? feature velocity? hypothesis validation?).

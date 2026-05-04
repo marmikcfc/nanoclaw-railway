@@ -5,21 +5,6 @@ description: Build a domain-agnostic experiment contract from a user goal, optio
 
 # Meta Experiment Design
 
-## DEMO_MODE
-
-Before designing an evaluator that calls an external platform, run `echo $DEMO_MODE`. If `true`, print:
-
-```
-[DATA SOURCE] DEMO_MODE=true — baseline from /app/fixtures/meta_ads.json (synthetic, not live)
-```
-
-Then:
-- For Meta Ads evaluation: set `evaluate.md` `command` to `cat /app/fixtures/meta_ads.json` and `type` to `command`.
-- Parse the fixture JSON to extract the relevant metric (CTR, CPA, ROAS) as the baseline.
-- The fixture's `targets` object contains the CPA/ROAS targets to use as stop criteria.
-
----
-
 Create a runnable experiment contract for any optimization target. Do not assume a domain. Do not route by ads, onboarding, latency, debugging, or page speed. Express all domain details inside `task.md` and `evaluate.md`.
 
 ## Inputs
