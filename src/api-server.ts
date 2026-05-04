@@ -445,17 +445,44 @@ async function handleStopQuery(_body: unknown, res: http.ServerResponse): Promis
   json(res, 200, { ok: true });
 }
 
-// Wake an agent because a task transitioned into a status this agent listens for.
-// V1: acknowledge and log. Wiring into the task scheduler so the agent actually
-// picks up the task is the follow-up step of gap 1; the dispatch path is in
-// place so the cloud side can ship independently.
+// Wake an agent because a task transitioned into a status this agent listens for,
+// or because a next_task_id chain activated. Mirrors the webchat trigger path used
+// by the delegate route so the agent picks up the task immediately.
 async function handleWakeTask(body: unknown, res: http.ServerResponse): Promise<void> {
-  const { task_id, reason } = (body as { task_id?: string; reason?: string }) || {};
+  const { task_id, reason, task_title, task_description } =
+    (body as { task_id?: string; reason?: string; task_title?: string; task_description?: string }) || {};
+
   if (!task_id) {
     json(res, 400, { error: 'task_id required' });
     return;
   }
-  logger.info({ task_id, reason }, 'wake-task received');
+
+  logger.info({ task_id, reason, task_title }, 'wake-task received — triggering agent');
+
+  // Build a briefing the agent will see as its incoming message.
+  const briefing = task_title
+    ? `**Task ready:** ${task_title}${task_description ? `\n\n${task_description}` : ''}`
+    : `You have a new task (id: ${task_id}). Check your task list and proceed.`;
+
+  storeMessage({
+    id: randomUUID(),
+    chat_jid: 'admin@pepper',
+    sender: 'system',
+    sender_name: 'System',
+    content: briefing,
+    timestamp: new Date().toISOString(),
+    is_from_me: false,
+    is_bot_message: false,
+  });
+
+  // Register task_id so the agent's turn is attributed to this task.
+  const channel = _getWebchatChannel?.();
+  if (channel) {
+    channel.incomingTraceIds.push(randomUUID());
+    channel.incomingTaskIds.push(task_id);
+  }
+
+  _enqueueWebchat?.('admin@pepper');
   json(res, 200, { ok: true });
 }
 
