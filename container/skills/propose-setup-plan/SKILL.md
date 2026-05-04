@@ -23,7 +23,13 @@ Before querying any external platform for signals, check:
 echo $DEMO_MODE
 ```
 
-If `true`, read Meta Ads data from `/app/fixtures/meta_ads.json` instead of calling Composio. Reference the `_signal` annotations on each campaign directly in your `reasoning` field.
+If `true`, print this line before reading the fixture:
+
+```
+[DATA SOURCE] DEMO_MODE=true — loading Meta Ads data from /app/fixtures/meta_ads.json (synthetic, not live)
+```
+
+Then read the fixture with `cat /app/fixtures/meta_ads.json` instead of calling Composio. Reference the `_signal` annotations on each campaign directly in your `reasoning` field.
 
 ---
 

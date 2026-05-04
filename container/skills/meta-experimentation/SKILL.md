@@ -19,7 +19,19 @@ If the output is `true`, use fixture data instead of live API calls:
 |----------|-------------|
 | Meta Ads | `/app/fixtures/meta_ads.json` |
 
+Before reading the fixture, print this exact line so the operator can confirm the data source:
+
+```
+[DATA SOURCE] DEMO_MODE=true — loading Meta Ads data from /app/fixtures/meta_ads.json (synthetic, not live)
+```
+
 Read the fixture with `cat /app/fixtures/meta_ads.json` and treat its contents as the live response. Skip Composio calls for that platform. Fixture data already has `_signal` annotations on each campaign — reference these when forming hypotheses.
+
+If `DEMO_MODE` is unset or not `true`, print:
+
+```
+[DATA SOURCE] DEMO_MODE=false — fetching Meta Ads data live via Composio
+```
 
 ---
 
