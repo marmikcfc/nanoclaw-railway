@@ -17,10 +17,10 @@
       "campaign_name": "Pepper — Brand Search (Google-style)",
       "objective": "CONVERSIONS",
       "status": "ACTIVE",
-      "spend": 1840.00,
+      "spend": 1840,
       "impressions": 48200,
       "clicks": 2314,
-      "ctr": 4.80,
+      "ctr": 4.8,
       "cpm": 38.17,
       "cpc": 0.79,
       "conversions": 42,
@@ -35,7 +35,7 @@
       "campaign_name": "Pepper — Cold Audience (Founders / CTOs)",
       "objective": "CONVERSIONS",
       "status": "ACTIVE",
-      "spend": 6200.00,
+      "spend": 6200,
       "impressions": 512000,
       "clicks": 3174,
       "ctr": 0.62,
@@ -53,10 +53,10 @@
       "campaign_name": "Pepper — Retargeting (Site Visitors 7d)",
       "objective": "CONVERSIONS",
       "status": "ACTIVE",
-      "spend": 980.00,
+      "spend": 980,
       "impressions": 28400,
       "clicks": 1278,
-      "ctr": 4.50,
+      "ctr": 4.5,
       "cpm": 34.51,
       "cpc": 0.77,
       "conversions": 31,
@@ -71,10 +71,10 @@
       "campaign_name": "Pepper — Lookalike (1% Signups)",
       "objective": "TRAFFIC",
       "status": "ACTIVE",
-      "spend": 2100.00,
+      "spend": 2100,
       "impressions": 198000,
       "clicks": 4752,
-      "ctr": 2.40,
+      "ctr": 2.4,
       "cpm": 10.61,
       "cpc": 0.44,
       "conversions": 11,
@@ -86,7 +86,7 @@
     }
   ],
   "account_summary": {
-    "total_spend": 11120.00,
+    "total_spend": 11120,
     "total_impressions": 786600,
     "total_clicks": 11518,
     "blended_ctr": 1.46,
@@ -96,9 +96,9 @@
     "blended_roas": 1.74
   },
   "targets": {
-    "roas": 3.0,
-    "cpa": 80.00,
-    "ctr_cold_audience": 1.50
+    "roas": 3,
+    "cpa": 80,
+    "ctr_cold_audience": 1.5
   },
   "top_performing_creatives": [
     {
@@ -109,7 +109,8 @@
       "ctr": 5.1,
       "cpc": 0.71,
       "status": "ACTIVE",
-      "_note": "Control — strong performer on brand-aware audience. Speed framing resonates."
+      "_note": "Control — strong performer on brand-aware audience. Speed framing resonates.",
+      "image_path": "scripts/demo-data/creatives/cr_001.png"
     },
     {
       "creative_id": "cr_002",
@@ -119,7 +120,8 @@
       "ctr": 0.8,
       "cpc": 1.88,
       "status": "ACTIVE",
-      "_note": "Cold audience primary — failing. TCO framing lands without context for cold founders."
+      "_note": "Cold audience primary — failing. TCO framing lands without context for cold founders.",
+      "image_path": "scripts/demo-data/creatives/cr_002.png"
     },
     {
       "creative_id": "cr_003",
@@ -129,7 +131,8 @@
       "ctr": 0.71,
       "cpc": 2.11,
       "status": "ACTIVE",
-      "_note": "Cold audience variant — slightly worse than cr_002. Automation framing too generic."
+      "_note": "Cold audience variant — slightly worse than cr_002. Automation framing too generic.",
+      "image_path": "scripts/demo-data/creatives/cr_003.png"
     },
     {
       "creative_id": "cr_004",
@@ -139,7 +142,8 @@
       "ctr": 2.4,
       "cpc": 0.44,
       "status": "ACTIVE",
-      "_note": "Lookalike campaign — good CTR but 0.23% conversion. Landing page is the bottleneck, not the ad."
+      "_note": "Lookalike campaign — good CTR but 0.23% conversion. Landing page is the bottleneck, not the ad.",
+      "image_path": "scripts/demo-data/creatives/cr_004.png"
     },
     {
       "creative_id": "cr_005",
@@ -149,7 +153,8 @@
       "ctr": 4.5,
       "cpc": 0.77,
       "status": "ACTIVE",
-      "_note": "Retargeting — strong. Familiarity framing works well for warm audiences."
+      "_note": "Retargeting — strong. Familiarity framing works well for warm audiences.",
+      "image_path": "scripts/demo-data/creatives/cr_005.png"
     }
   ],
   "creative_analysis": {
