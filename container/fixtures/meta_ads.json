@@ -108,7 +108,8 @@
       "body": "Deploy specialized agents for growth, ops, and product. No DevOps required.",
       "ctr": 5.1,
       "cpc": 0.71,
-      "_note": "Current control creative"
+      "status": "ACTIVE",
+      "_note": "Control — strong performer on brand-aware audience. Speed framing resonates."
     },
     {
       "creative_id": "cr_002",
@@ -117,7 +118,48 @@
       "body": "One AI team that understands your business and runs it.",
       "ctr": 0.8,
       "cpc": 1.88,
-      "_note": "Cold audience — low CTR, hypothesis: TCO framing not landing without context"
+      "status": "ACTIVE",
+      "_note": "Cold audience primary — failing. TCO framing lands without context for cold founders."
+    },
+    {
+      "creative_id": "cr_003",
+      "campaign_id": "c_002",
+      "headline": "Your ops team. Automated.",
+      "body": "Pepper agents handle your growth, finance, and product workflows — fully transparent, always running.",
+      "ctr": 0.71,
+      "cpc": 2.11,
+      "status": "ACTIVE",
+      "_note": "Cold audience variant — slightly worse than cr_002. Automation framing too generic."
+    },
+    {
+      "creative_id": "cr_004",
+      "campaign_id": "c_004",
+      "headline": "Hire your first AI employee",
+      "body": "Founders use Pepper to delegate research, outreach, and reporting to AI agents that actually ship.",
+      "ctr": 2.4,
+      "cpc": 0.44,
+      "status": "ACTIVE",
+      "_note": "Lookalike campaign — good CTR but 0.23% conversion. Landing page is the bottleneck, not the ad."
+    },
+    {
+      "creative_id": "cr_005",
+      "campaign_id": "c_003",
+      "headline": "You already know Pepper works.",
+      "body": "Come back and deploy the agents you need. Takes 2 minutes.",
+      "ctr": 4.5,
+      "cpc": 0.77,
+      "status": "ACTIVE",
+      "_note": "Retargeting — strong. Familiarity framing works well for warm audiences."
     }
-  ]
+  ],
+  "creative_analysis": {
+    "problem_creative": "cr_002",
+    "control_creative": "cr_001",
+    "insight": "Cold audience creatives (cr_002, cr_003) share a pattern: they lead with cost/tool-reduction framing which requires context the cold audience doesn't have. Brand-aware and retargeting creatives lead with speed and familiarity — which works. Hypothesis: cold audience needs outcome-first framing (what they get, not what they stop paying for).",
+    "suggested_test_angles": [
+      "Outcome framing: 'Close your Series A faster. Pepper runs your investor research.'",
+      "Social proof: 'Backed by 200 founders who replaced 3 SaaS tools in week 1.'",
+      "Problem-first: 'Still writing your weekly report manually? Your competitors aren’t.'"
+    ]
+  }
 }
