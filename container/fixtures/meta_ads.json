@@ -1,0 +1,123 @@
+{
+  "_note": "Synthetic Meta Ads data for Pepper demo. Loaded when DEMO_MODE=true.",
+  "_generated": "2026-05-04",
+  "account": {
+    "id": "act_222966153",
+    "name": "Pepper Ads",
+    "currency": "USD"
+  },
+  "date_range": {
+    "preset": "last_30d",
+    "from": "2026-04-04",
+    "to": "2026-05-03"
+  },
+  "campaigns": [
+    {
+      "campaign_id": "c_001",
+      "campaign_name": "Pepper — Brand Search (Google-style)",
+      "objective": "CONVERSIONS",
+      "status": "ACTIVE",
+      "spend": 1840.00,
+      "impressions": 48200,
+      "clicks": 2314,
+      "ctr": 4.80,
+      "cpm": 38.17,
+      "cpc": 0.79,
+      "conversions": 42,
+      "cost_per_conversion": 43.81,
+      "roas": 3.8,
+      "reach": 31400,
+      "frequency": 1.54,
+      "_signal": "Strong performer — brand intent audience converts well. ROAS above target."
+    },
+    {
+      "campaign_id": "c_002",
+      "campaign_name": "Pepper — Cold Audience (Founders / CTOs)",
+      "objective": "CONVERSIONS",
+      "status": "ACTIVE",
+      "spend": 6200.00,
+      "impressions": 512000,
+      "clicks": 3174,
+      "ctr": 0.62,
+      "cpm": 12.11,
+      "cpc": 1.95,
+      "conversions": 19,
+      "cost_per_conversion": 326.32,
+      "roas": 0.6,
+      "reach": 310000,
+      "frequency": 1.65,
+      "_signal": "PRIMARY PROBLEM: CTR 0.62% is well below 1.5% benchmark. Creative not resonating with cold audience. High CPA ($326) vs target ($80). This is the campaign the agent should target."
+    },
+    {
+      "campaign_id": "c_003",
+      "campaign_name": "Pepper — Retargeting (Site Visitors 7d)",
+      "objective": "CONVERSIONS",
+      "status": "ACTIVE",
+      "spend": 980.00,
+      "impressions": 28400,
+      "clicks": 1278,
+      "ctr": 4.50,
+      "cpm": 34.51,
+      "cpc": 0.77,
+      "conversions": 31,
+      "cost_per_conversion": 31.61,
+      "roas": 5.2,
+      "reach": 12800,
+      "frequency": 2.22,
+      "_signal": "Best ROAS (5.2x). Audience saturating — frequency 2.2x. Budget constrained, should scale."
+    },
+    {
+      "campaign_id": "c_004",
+      "campaign_name": "Pepper — Lookalike (1% Signups)",
+      "objective": "TRAFFIC",
+      "status": "ACTIVE",
+      "spend": 2100.00,
+      "impressions": 198000,
+      "clicks": 4752,
+      "ctr": 2.40,
+      "cpm": 10.61,
+      "cpc": 0.44,
+      "conversions": 11,
+      "cost_per_conversion": 190.91,
+      "roas": 0.9,
+      "reach": 142000,
+      "frequency": 1.39,
+      "_signal": "Traffic objective — clicks look good but conversion rate low (0.23%). Landing page friction, not ad friction. Good candidate for landing page A/B test."
+    }
+  ],
+  "account_summary": {
+    "total_spend": 11120.00,
+    "total_impressions": 786600,
+    "total_clicks": 11518,
+    "blended_ctr": 1.46,
+    "blended_cpc": 0.97,
+    "total_conversions": 103,
+    "blended_cpa": 107.96,
+    "blended_roas": 1.74
+  },
+  "targets": {
+    "roas": 3.0,
+    "cpa": 80.00,
+    "ctr_cold_audience": 1.50
+  },
+  "top_performing_creatives": [
+    {
+      "creative_id": "cr_001",
+      "campaign_id": "c_001",
+      "headline": "Build your AI team in 2 minutes",
+      "body": "Deploy specialized agents for growth, ops, and product. No DevOps required.",
+      "ctr": 5.1,
+      "cpc": 0.71,
+      "_note": "Current control creative"
+    },
+    {
+      "creative_id": "cr_002",
+      "campaign_id": "c_002",
+      "headline": "Stop managing 10 SaaS tools",
+      "body": "One AI team that understands your business and runs it.",
+      "ctr": 0.8,
+      "cpc": 1.88,
+      "_note": "Cold audience — low CTR, hypothesis: TCO framing not landing without context"
+    }
+  ]
+}

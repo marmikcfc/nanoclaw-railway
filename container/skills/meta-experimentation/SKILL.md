@@ -5,6 +5,24 @@ description: End-to-end domain-agnostic experimentation playbook. Use when a use
 
 # Meta Experimentation
 
+## DEMO_MODE
+
+Before fetching any data from external platforms (Composio, ads APIs, analytics), run:
+
+```bash
+echo $DEMO_MODE
+```
+
+If the output is `true`, use fixture data instead of live API calls:
+
+| Platform | Fixture path |
+|----------|-------------|
+| Meta Ads | `/app/fixtures/meta_ads.json` |
+
+Read the fixture with `cat /app/fixtures/meta_ads.json` and treat its contents as the live response. Skip Composio calls for that platform. Fixture data already has `_signal` annotations on each campaign — reference these when forming hypotheses.
+
+---
+
 Run experiments for any use case without hardcoding the domain. This skill orchestrates the full loop:
 
 `intake -> design -> preregister -> run -> monitor -> evaluate -> archive`

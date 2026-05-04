@@ -61,6 +61,9 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Copy demo fixtures (read by agent when DEMO_MODE=true)
+COPY fixtures/ /app/fixtures/
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
