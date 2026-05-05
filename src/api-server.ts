@@ -145,14 +145,13 @@ async function handleDisableIntegration(body: unknown, res: http.ServerResponse)
   json(res, 200, { success: true });
 }
 
-async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Promise<void> {
+export async function processWebhookEvent(body: unknown): Promise<void> {
   // PEPPER_MODE: all webhook-event calls go to the Pepper agent runner
   if (process.env.PEPPER_MODE === 'true') {
     const { runPepperRailwayAgent } = await import('./pepper-tasks/runner.js');
     runPepperRailwayAgent(body).catch((err) => {
       logger.error({ err }, 'Pepper Railway agent error');
     });
-    json(res, 202, { accepted: true });
     return;
   }
 
@@ -227,7 +226,6 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
     }
 
     _enqueueWebchat?.('admin@pepper');
-    json(res, 200, { ok: true });
     return;
   }
 
@@ -236,7 +234,6 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
   const groupEntries = Object.entries(groups);
   if (groupEntries.length === 0) {
     logger.warn({ integrationId }, 'Webhook received but no group registered');
-    json(res, 200, { ok: true }); // don't error — agent may not have a group yet
     return;
   }
 
@@ -251,7 +248,15 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
     is_from_me: false,
     is_bot_message: false,
   });
+}
 
+async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Promise<void> {
+  await processWebhookEvent(body);
+
+  if (process.env.PEPPER_MODE === 'true') {
+    json(res, 202, { accepted: true });
+    return;
+  }
   json(res, 200, { ok: true });
 }
 
@@ -448,13 +453,12 @@ async function handleStopQuery(_body: unknown, res: http.ServerResponse): Promis
 // Wake an agent because a task transitioned into a status this agent listens for,
 // or because a next_task_id chain activated. Mirrors the webchat trigger path used
 // by the delegate route so the agent picks up the task immediately.
-async function handleWakeTask(body: unknown, res: http.ServerResponse): Promise<void> {
+export async function processWakeTask(body: unknown): Promise<void> {
   const { task_id, reason, task_title, task_description } =
     (body as { task_id?: string; reason?: string; task_title?: string; task_description?: string }) || {};
 
   if (!task_id) {
-    json(res, 400, { error: 'task_id required' });
-    return;
+    throw new Error('task_id required');
   }
 
   logger.info({ task_id, reason, task_title }, 'wake-task received — triggering agent');
@@ -483,7 +487,28 @@ async function handleWakeTask(body: unknown, res: http.ServerResponse): Promise<
   }
 
   _enqueueWebchat?.('admin@pepper');
+}
+
+async function handleWakeTask(body: unknown, res: http.ServerResponse): Promise<void> {
+  try {
+    await processWakeTask(body);
+  } catch (err) {
+    json(res, 400, { error: err instanceof Error ? err.message : 'wake-task failed' });
+    return;
+  }
   json(res, 200, { ok: true });
+}
+
+export async function processSlackIncomingEvent(event: unknown, teamId?: string): Promise<void> {
+  const slackChannel = connectedChannels.find(
+    (ch) => ch.name === 'slack' && 'handleSlackEvent' in ch,
+  ) as (Channel & { handleSlackEvent(e: unknown, t?: string): Promise<void> }) | undefined;
+
+  if (!slackChannel) {
+    throw new Error('Slack channel not connected');
+  }
+
+  await slackChannel.handleSlackEvent(event, teamId);
 }
 
 async function handleSlackIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
@@ -493,31 +518,16 @@ async function handleSlackIncoming(body: unknown, res: http.ServerResponse): Pro
     return;
   }
 
-  const slackChannel = connectedChannels.find(
-    (ch) => ch.name === 'slack' && 'handleSlackEvent' in ch,
-  ) as (Channel & { handleSlackEvent(e: unknown, t?: string): Promise<void> }) | undefined;
-
-  if (!slackChannel) {
-    json(res, 503, { error: 'Slack channel not connected' });
-    return;
-  }
-
-  json(res, 200, { ok: true });
-
-  slackChannel.handleSlackEvent(event, team_id).catch((err) => {
+  try {
+    await processSlackIncomingEvent(event, team_id);
+    json(res, 200, { ok: true });
+  } catch (err) {
     logger.error({ err: err instanceof Error ? err.stack : err }, 'Slack handleSlackEvent failed');
-  });
+    json(res, 503, { error: err instanceof Error ? err.message : 'Slack handling failed' });
+  }
 }
 
-async function handleTelegramIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
-  const { update } = body as { update?: unknown };
-  logger.info({ has_update: !!update }, '[tg-incoming] received from Vercel gateway');
-  if (!update) {
-    logger.warn('[tg-incoming] missing update field in body');
-    json(res, 400, { error: 'Missing update' });
-    return;
-  }
-
+export async function processTelegramIncomingUpdate(update: unknown): Promise<void> {
   const upd = update as { message?: { chat?: { id: number }; text?: string; message_id?: number } };
   logger.info({ chatId: upd.message?.chat?.id, text: upd.message?.text?.slice(0, 60), msgId: upd.message?.message_id }, '[tg-incoming] update parsed');
 
@@ -529,19 +539,30 @@ async function handleTelegramIncoming(body: unknown, res: http.ServerResponse): 
 
   if (!tgChannel) {
     logger.error('[tg-incoming] Telegram channel NOT connected — cannot handle update');
-    json(res, 503, { error: 'Telegram channel not connected' });
+    throw new Error('Telegram channel not connected');
+  }
+
+  logger.info('[tg-incoming] dispatching handleUpdate');
+  await tgChannel.handleUpdate(update);
+  logger.info('[tg-incoming] handleUpdate completed');
+}
+
+async function handleTelegramIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
+  const { update } = body as { update?: unknown };
+  logger.info({ has_update: !!update }, '[tg-incoming] received from Vercel gateway');
+  if (!update) {
+    logger.warn('[tg-incoming] missing update field in body');
+    json(res, 400, { error: 'Missing update' });
     return;
   }
 
-  // Acknowledge immediately — processing is async (mirrors handleCronTick pattern)
-  json(res, 200, { ok: true });
-  logger.info('[tg-incoming] 200 sent to Vercel, dispatching handleUpdate');
-
-  tgChannel.handleUpdate(update).then(() => {
-    logger.info('[tg-incoming] handleUpdate completed');
-  }).catch((err) => {
+  try {
+    await processTelegramIncomingUpdate(update);
+    json(res, 200, { ok: true });
+  } catch (err) {
     logger.error({ err: err instanceof Error ? err.stack : err, update: JSON.stringify(update).slice(0, 200) }, '[tg-incoming] handleUpdate FAILED');
-  });
+    json(res, 503, { error: err instanceof Error ? err.message : 'Telegram handling failed' });
+  }
 }
 
 async function handleVapiWebhook(body: string, parsedBody: unknown, res: http.ServerResponse): Promise<void> {

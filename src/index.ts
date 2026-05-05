@@ -1284,6 +1284,9 @@ async function main(): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     }).catch((err) => logger.warn({ err }, 'Failed to signal awake to cloud'));
 
+    const { drainCloudInboxEvents } = await import('./cloud-inbox-drain.js');
+    drainCloudInboxEvents().catch((err) => logger.warn({ err }, 'cloud-inbox drain failed'));
+
     const tgChannel = channels.find((ch) => ch.name === 'telegram');
     if (tgChannel && 'handleUpdate' in tgChannel) {
       const { drainPendingTelegramMessages } = await import('./telegram-drain.js');
