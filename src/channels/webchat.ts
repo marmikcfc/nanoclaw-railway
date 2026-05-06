@@ -72,6 +72,15 @@ export class WebchatChannel implements Channel {
     const signature = createHmac('sha256', secret).update(body).digest('hex');
 
     try {
+      logger.info(
+        {
+          agentId,
+          traceId: event.trace_id,
+          taskId: event.task_id ?? null,
+          textLength: text.length,
+        },
+        'WebchatChannel: posting agent reply to cloud',
+      );
       const res = await fetch(`${cloudUrl}/api/events/${agentId}`, {
         method: 'POST',
         headers: {
@@ -85,6 +94,16 @@ export class WebchatChannel implements Channel {
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         logger.error({ status: res.status, body: text }, 'WebchatChannel: failed to POST agent reply');
+      } else {
+        logger.info(
+          {
+            agentId,
+            traceId: event.trace_id,
+            taskId: event.task_id ?? null,
+            status: res.status,
+          },
+          'WebchatChannel: posted agent reply to cloud',
+        );
       }
     } catch (err) {
       logger.error({ err }, 'WebchatChannel: network error posting agent reply');

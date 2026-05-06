@@ -20,6 +20,14 @@ function sign(secret: string, body: string): string {
   return createHmac('sha256', secret).update(body).digest('hex');
 }
 
+function safeOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
 async function postResult(
   cloudUrl: string,
   agentId: string,
@@ -29,21 +37,49 @@ async function postResult(
   body: Record<string, unknown>,
 ): Promise<void> {
   const bodyText = JSON.stringify(body);
-  const res = await fetch(`${cloudUrl}/api/agents/${agentId}/inbox/${eventId}/${action}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-event-signature': sign(secret, bodyText),
-    },
-    body: bodyText,
-    signal: AbortSignal.timeout(10_000),
-  });
+  const url = `${cloudUrl}/api/agents/${agentId}/inbox/${eventId}/${action}`;
+  logger.info({ eventId, action, cloudOrigin: safeOrigin(cloudUrl) }, 'cloud-inbox: posting result callback');
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-event-signature': sign(secret, bodyText),
+      },
+      body: bodyText,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    logger.warn(
+      {
+        eventId,
+        action,
+        cloudOrigin: safeOrigin(cloudUrl),
+        error: err instanceof Error ? err.message : String(err),
+      },
+      'cloud-inbox: result callback network error',
+    );
+    throw err;
+  }
   if (!res.ok) {
-    logger.warn({ eventId, action, status: res.status }, 'cloud-inbox: result callback failed');
+    const text = await res.text().catch(() => '');
+    logger.warn({ eventId, action, status: res.status, body: text.slice(0, 500) }, 'cloud-inbox: result callback failed');
+  } else {
+    logger.info({ eventId, action, status: res.status }, 'cloud-inbox: result callback ok');
   }
 }
 
 async function processInboxEvent(event: CloudInboxEvent): Promise<void> {
+  logger.info(
+    {
+      eventId: event.id,
+      channel: event.channel,
+      kind: event.kind,
+      command: event.railway_command,
+    },
+    'cloud-inbox: processing event',
+  );
   if (event.railway_command === 'webhook-event') {
     await processWebhookEvent(event.payload);
     return;
@@ -75,23 +111,55 @@ export async function drainCloudInboxEvents(): Promise<void> {
   const cloudUrl = process.env.PEPPER_CLOUD_URL;
   const agentId = process.env.AGENT_ID;
   const secret = process.env.PEPPER_EVENT_SECRET;
-  if (!cloudUrl || !agentId || !secret) return;
+  if (!cloudUrl || !agentId || !secret) {
+    logger.warn(
+      {
+        hasCloudUrl: Boolean(cloudUrl),
+        hasAgentId: Boolean(agentId),
+        hasSecret: Boolean(secret),
+      },
+      'cloud-inbox: missing env vars, skipping drain',
+    );
+    return;
+  }
 
   const signature = sign(secret, agentId);
   let drained = 0;
+  let failed = 0;
+
+  logger.info({ agentId }, 'cloud-inbox: drain start');
 
   for (let page = 0; page < 5; page++) {
-    const res = await fetch(`${cloudUrl}/api/agents/${agentId}/inbox?limit=50`, {
-      headers: { 'x-event-signature': signature },
-      signal: AbortSignal.timeout(10_000),
-    });
+    const url = `${cloudUrl}/api/agents/${agentId}/inbox?limit=50`;
+    logger.info({ page, cloudOrigin: safeOrigin(cloudUrl) }, 'cloud-inbox: fetching pending events');
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { 'x-event-signature': signature },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          page,
+          cloudOrigin: safeOrigin(cloudUrl),
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'cloud-inbox: fetch pending network error',
+      );
+      throw err;
+    }
     if (!res.ok) {
-      logger.warn({ status: res.status }, 'cloud-inbox: fetch pending returned non-200');
+      const text = await res.text().catch(() => '');
+      logger.warn({ status: res.status, body: text.slice(0, 500) }, 'cloud-inbox: fetch pending returned non-200');
       return;
     }
 
     const { events } = (await res.json()) as { events?: CloudInboxEvent[] };
-    if (!events || events.length === 0) break;
+    if (!events || events.length === 0) {
+      logger.info({ page }, 'cloud-inbox: no pending events');
+      break;
+    }
 
     logger.info({ count: events.length }, 'cloud-inbox: processing pending events');
     for (const event of events) {
@@ -101,13 +169,12 @@ export async function drainCloudInboxEvents(): Promise<void> {
         drained++;
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
+        failed++;
         logger.warn({ eventId: event.id, error }, 'cloud-inbox: event processing failed');
         await postResult(cloudUrl, agentId, secret, event.id, 'fail', { error });
       }
     }
   }
 
-  if (drained > 0) {
-    logger.info({ drained }, 'cloud-inbox: drain complete');
-  }
+  logger.info({ drained, failed }, 'cloud-inbox: drain complete');
 }

@@ -169,6 +169,15 @@ export async function processWebhookEvent(body: unknown): Promise<void> {
       task_id?: string;
       attachments?: { url: string; mimeType: string; filename?: string }[];
     });
+    logger.info(
+      {
+        traceId,
+        taskId: task_id ?? null,
+        contentLength: content?.length ?? 0,
+        attachmentCount: rawAttachments?.length ?? 0,
+      },
+      'Webchat webhook received',
+    );
 
     // Download and process any attachments (images/PDFs)
     const processedAttachments: import('./media.js').ProcessedAttachment[] = [];
@@ -223,9 +232,25 @@ export async function processWebhookEvent(body: unknown): Promise<void> {
     if (channel) {
       channel.incomingTraceIds.push(traceId);
       channel.incomingTaskIds.push(task_id ?? null);
+      logger.info(
+        {
+          traceId,
+          taskId: task_id ?? null,
+          queuedTraceIds: channel.incomingTraceIds.length,
+          queuedTaskIds: channel.incomingTaskIds.length,
+        },
+        'Webchat webhook queued for group processing',
+      );
+    } else {
+      logger.warn({ traceId, taskId: task_id ?? null }, 'Webchat webhook had no channel instance');
     }
 
-    _enqueueWebchat?.('admin@pepper');
+    if (_enqueueWebchat) {
+      _enqueueWebchat('admin@pepper');
+      logger.info({ traceId, taskId: task_id ?? null }, 'Webchat group enqueue requested');
+    } else {
+      logger.warn({ traceId, taskId: task_id ?? null }, 'Webchat enqueue function missing');
+    }
     return;
   }
 
@@ -691,21 +716,64 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     const command = commandMatch[1];
     const body = await readBody(req);
     const signature = req.headers['x-event-signature'] as string | undefined;
+    logger.info(
+      {
+        command,
+        method,
+        bodyBytes: Buffer.byteLength(body),
+        hasSignature: Boolean(signature),
+        userAgent: req.headers['user-agent'] ?? null,
+        forwardedFor: req.headers['x-forwarded-for'] ?? null,
+      },
+      '[railway<-cloud] command received',
+    );
 
     if (!verifyHmac(body, signature)) {
+      logger.warn(
+        {
+          command,
+          hasSignature: Boolean(signature),
+          bodyBytes: Buffer.byteLength(body),
+        },
+        '[railway<-cloud] command rejected: invalid signature',
+      );
       json(res, 401, { error: 'Invalid signature' });
       return;
     }
+    logger.info({ command }, '[railway<-cloud] command authenticated');
 
     const handler = ALLOWED_COMMANDS[command];
     if (!handler) {
+      logger.warn({ command }, '[railway<-cloud] command rejected: unknown command');
       json(res, 400, { error: `Unknown command: ${command}` });
       return;
     }
 
     let parsed: unknown = {};
     try { parsed = JSON.parse(body); } catch {}
-    return handler(parsed, res);
+    logger.info({ command }, '[railway<-cloud] command dispatching handler');
+    try {
+      await handler(parsed, res);
+      logger.info(
+        {
+          command,
+          responseEnded: res.writableEnded,
+          statusCode: res.statusCode,
+        },
+        '[railway<-cloud] command handler completed',
+      );
+      return;
+    } catch (err) {
+      logger.error(
+        {
+          command,
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        },
+        '[railway<-cloud] command handler failed',
+      );
+      throw err;
+    }
   }
 
   // Preview route — serve HTML/CSS/JS/images from preview directory (no auth)

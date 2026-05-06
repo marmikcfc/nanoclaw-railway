@@ -341,6 +341,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       })()
     : null;
 
+  if (channel.ownsJid('admin@pepper')) {
+    logger.info(
+      {
+        chatJid,
+        webchatTraceId,
+        webchatTaskId,
+      },
+      'Webchat processing context resolved',
+    );
+  }
+
   const isDM = group.isDM === true;
 
   // WhatsApp personal number mode: check whitelist for DMs
@@ -532,6 +543,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (channel.ownsJid('admin@pepper')) { runningWebchatTaskId = null; webchatAgentIdle = false; }
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  logger.info(
+    {
+      group: group.name,
+      chatJid,
+      effectiveTaskId,
+      webchatTraceId,
+      output,
+      hadError,
+      outputSentToUser,
+    },
+    'Agent run completed',
+  );
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -1272,6 +1296,9 @@ async function main(): Promise<void> {
   const agentId = process.env.AGENT_ID;
   const secret = process.env.PEPPER_EVENT_SECRET;
   if (IS_RAILWAY && cloudUrl && agentId && secret) {
+    let cloudOrigin = 'invalid-url';
+    try { cloudOrigin = new URL(cloudUrl).origin; } catch {}
+    logger.info({ agentId, cloudOrigin }, 'Signaling cloud that Railway agent is awake');
     const awakeBody = JSON.stringify({ startup: true });
     const awakeSignature = crypto.createHmac('sha256', secret).update(awakeBody).digest('hex');
     fetch(`${cloudUrl}/api/agents/${agentId}/awake`, {
@@ -1282,7 +1309,23 @@ async function main(): Promise<void> {
       },
       body: awakeBody,
       signal: AbortSignal.timeout(10_000),
-    }).catch((err) => logger.warn({ err }, 'Failed to signal awake to cloud'));
+    })
+      .then((res) => {
+        if (!res.ok) {
+          res.text()
+            .then((text) => logger.warn({ status: res.status, body: text.slice(0, 500), cloudOrigin }, 'Cloud awake signal returned non-200'))
+            .catch(() => logger.warn({ status: res.status, cloudOrigin }, 'Cloud awake signal returned non-200'));
+        } else {
+          logger.info({ status: res.status, cloudOrigin }, 'Cloud awake signal succeeded');
+        }
+      })
+      .catch((err) => logger.warn(
+        {
+          cloudOrigin,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'Failed to signal awake to cloud',
+      ));
 
     const { drainCloudInboxEvents } = await import('./cloud-inbox-drain.js');
     drainCloudInboxEvents().catch((err) => logger.warn({ err }, 'cloud-inbox drain failed'));
