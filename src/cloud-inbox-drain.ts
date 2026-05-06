@@ -134,10 +134,12 @@ export async function drainCloudInboxEvents(): Promise<void> {
     logger.info({ page, cloudOrigin: safeOrigin(cloudUrl) }, 'cloud-inbox: fetching pending events');
     let res: Response;
     try {
+      logger.info({ page, cloudOrigin: safeOrigin(cloudUrl) }, '[railway-egress] cloud-inbox fetch sending');
       res = await fetch(url, {
         headers: { 'x-event-signature': signature },
         signal: AbortSignal.timeout(10_000),
       });
+      logger.info({ page, status: res.status }, '[railway-egress] cloud-inbox fetch completed');
     } catch (err) {
       logger.warn(
         {

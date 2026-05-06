@@ -264,7 +264,9 @@ export class TelegramChannel implements Channel {
     });
 
     // Webhook mode: initialize bot (registers middleware pipeline) then validate token
+    logger.info('[railway-egress] telegram bot init sending');
     await this.bot.init();
+    logger.info('[railway-egress] telegram bot init completed');
     logger.info({ username: this.bot.botInfo.username, id: this.bot.botInfo.id }, 'Telegram bot ready (webhook mode)');
     console.log(`\n  Telegram bot: @${this.bot.botInfo.username}`);
     console.log(`  Receiving messages via Vercel gateway — no local polling\n`);

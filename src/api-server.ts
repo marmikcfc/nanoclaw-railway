@@ -738,6 +738,28 @@ const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse)
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = req.url || '';
   const method = req.method || '';
+  const startedAt = Date.now();
+  logger.info(
+    {
+      method,
+      url,
+      userAgent: req.headers['user-agent'] ?? null,
+      forwardedFor: req.headers['x-forwarded-for'] ?? null,
+      remoteAddress: req.socket.remoteAddress ?? null,
+    },
+    '[railway-http] request received',
+  );
+  res.once('finish', () => {
+    logger.info(
+      {
+        method,
+        url,
+        statusCode: res.statusCode,
+        durationMs: Date.now() - startedAt,
+      },
+      '[railway-http] request completed',
+    );
+  });
 
   // Health check — no auth required
   if (method === 'GET' && url === '/api/health') {

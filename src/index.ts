@@ -111,9 +111,12 @@ async function fetchAllowedNumbers(): Promise<void> {
     .digest('hex');
 
   try {
-    const res = await fetch(`${cloudUrl}/api/provision/${agentId}/allowed-numbers`, {
+    const url = `${cloudUrl}/api/provision/${agentId}/allowed-numbers`;
+    logger.info({ urlHost: new URL(url).host }, '[railway-egress] allowed-numbers fetch sending');
+    const res = await fetch(url, {
       headers: { 'x-signature': signature },
     });
+    logger.info({ status: res.status }, '[railway-egress] allowed-numbers fetch completed');
     if (res.ok) {
       const data = await res.json() as { numbers?: string[] };
       allowedWhatsAppNumbers = new Set(data.numbers || []);
@@ -237,12 +240,15 @@ async function emitUserMessagesToCloud(
   const body = JSON.stringify({ events });
   const sig = crypto.createHmac('sha256', secret).update(body).digest('hex');
 
-  await fetch(`${cloudUrl}/api/events/${agentId}`, {
+  const url = `${cloudUrl}/api/events/${agentId}`;
+  logger.info({ urlHost: new URL(url).host, eventCount: events.length }, '[railway-egress] user-message events sending');
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-event-signature': sig },
     body,
     signal: AbortSignal.timeout(10_000),
   });
+  logger.info({ status: res.status }, '[railway-egress] user-message events completed');
 }
 
 async function markTurnComplete(turnId: string | null | undefined, assistantText: string): Promise<void> {
@@ -254,12 +260,15 @@ async function markTurnComplete(turnId: string | null | undefined, assistantText
   const body = JSON.stringify({ assistant_text: assistantText });
   const sig = crypto.createHmac('sha256', secret).update(body).digest('hex');
 
-  const res = await fetch(`${cloudUrl}/api/agents/${agentId}/turns/${turnId}/complete`, {
+  const url = `${cloudUrl}/api/agents/${agentId}/turns/${turnId}/complete`;
+  logger.info({ urlHost: new URL(url).host, turnId }, '[railway-egress] turn-complete sending');
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-event-signature': sig },
     body,
     signal: AbortSignal.timeout(10_000),
   });
+  logger.info({ status: res.status, turnId }, '[railway-egress] turn-complete completed');
 
   if (!res.ok) {
     throw new Error(`turn complete failed: HTTP ${res.status}`);
@@ -997,28 +1006,10 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
 
-    // Notify cloud FIRST so Supabase status flips to 'sleeping' before we
-    // start refusing HTTP connections. Any in-flight webhook hits while we're
-    // draining will see status=sleeping, skip the forward, and land in the
-    // durable inbox instead of hitting a closing HTTP server.
-    const _cloudUrl = process.env.PEPPER_CLOUD_URL;
-    const _agentId = process.env.AGENT_ID;
-    const _secret = process.env.PEPPER_EVENT_SECRET;
-    if (IS_RAILWAY && _cloudUrl && _agentId && _secret) {
-      try {
-        const sleepBody = JSON.stringify({ sleeping: true });
-        const sig = crypto.createHmac('sha256', _secret).update(sleepBody).digest('hex');
-        await fetch(`${_cloudUrl}/api/agents/${_agentId}/sleep`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-event-signature': sig },
-          body: sleepBody,
-          signal: AbortSignal.timeout(5_000),
-        });
-        logger.info('Notified cloud: agent sleeping');
-      } catch (err) {
-        logger.warn({ err }, 'Failed to notify cloud of sleep');
-      }
-    }
+    logger.info(
+      { signal, isRailway: IS_RAILWAY },
+      'Railway shutdown: skipping cloud sleep callback; cloud derives runtime liveness from last_runtime_seen_at',
+    );
 
     proxyServer?.close();
     await queue.shutdown(10000);
@@ -1360,7 +1351,9 @@ async function main(): Promise<void> {
     logger.info({ agentId, cloudOrigin }, 'Signaling cloud that Railway agent is awake');
     const awakeBody = JSON.stringify({ startup: true });
     const awakeSignature = crypto.createHmac('sha256', secret).update(awakeBody).digest('hex');
-    fetch(`${cloudUrl}/api/agents/${agentId}/awake`, {
+    const awakeUrl = `${cloudUrl}/api/agents/${agentId}/awake`;
+    logger.info({ urlHost: new URL(awakeUrl).host }, '[railway-egress] awake-signal sending');
+    fetch(awakeUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1370,6 +1363,7 @@ async function main(): Promise<void> {
       signal: AbortSignal.timeout(10_000),
     })
       .then((res) => {
+        logger.info({ status: res.status }, '[railway-egress] awake-signal completed');
         if (!res.ok) {
           res.text()
             .then((text) => logger.warn({ status: res.status, body: text.slice(0, 500), cloudOrigin }, 'Cloud awake signal returned non-200'))

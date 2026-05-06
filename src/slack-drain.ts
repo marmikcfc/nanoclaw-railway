@@ -18,10 +18,13 @@ export async function drainPendingSlackMessages(
   const signature = createHmac('sha256', secret).update(agentId).digest('hex');
 
   try {
-    const res = await fetch(`${cloudUrl}/api/slack/pending/${agentId}`, {
+    const url = `${cloudUrl}/api/slack/pending/${agentId}`;
+    logger.info({ urlHost: new URL(url).host }, '[railway-egress] slack-drain fetch sending');
+    const res = await fetch(url, {
       headers: { 'x-event-signature': signature },
       signal: AbortSignal.timeout(10_000),
     });
+    logger.info({ status: res.status }, '[railway-egress] slack-drain fetch completed');
 
     if (!res.ok) {
       logger.warn({ status: res.status }, 'slack-drain: fetch returned non-200');

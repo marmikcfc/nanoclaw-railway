@@ -87,6 +87,13 @@ export async function reportScheduleHint(): Promise<void> {
     const scheduleUrl = wsId
       ? `${cloudUrl}/api/workspaces/${wsId}/agents/${agentId}/schedule-hint`
       : `${cloudUrl}/api/tasks/${agentId}/schedule-hint`;
+    logger.info(
+      {
+        urlHost: new URL(scheduleUrl).host,
+        earliestNextRun: task?.next_run ?? null,
+      },
+      '[railway-egress] schedule-hint sending',
+    );
     const res = await fetch(scheduleUrl, {
       method: 'POST',
       headers: {
@@ -95,6 +102,7 @@ export async function reportScheduleHint(): Promise<void> {
       },
       body,
     });
+    logger.info({ status: res.status }, '[railway-egress] schedule-hint completed');
     if (!res.ok) {
       logger.warn(
         { agentId, status: res.status },

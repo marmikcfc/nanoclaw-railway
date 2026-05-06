@@ -53,10 +53,13 @@ export class SlackChannel implements Channel {
 
   async connect(): Promise<void> {
     try {
-      const res = await fetch('https://slack.com/api/auth.test', {
+      const url = 'https://slack.com/api/auth.test';
+      logger.info({ urlHost: new URL(url).host }, '[railway-egress] slack auth.test sending');
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${this.botToken}` },
         signal: AbortSignal.timeout(10_000),
       });
+      logger.info({ status: res.status }, '[railway-egress] slack auth.test completed');
       const data = (await res.json()) as { ok: boolean; user_id?: string };
       if (data.ok && data.user_id) {
         this.botUserId = data.user_id;
@@ -194,13 +197,16 @@ export class SlackChannel implements Channel {
       const now = new Date().toISOString();
 
       do {
+        const url = `https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=200${cursor ? `&cursor=${cursor}` : ''}`;
+        logger.info({ urlHost: new URL(url).host, cursor: Boolean(cursor) }, '[railway-egress] slack conversations.list sending');
         const res = await fetch(
-          `https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=200${cursor ? `&cursor=${cursor}` : ''}`,
+          url,
           {
             headers: { Authorization: `Bearer ${this.botToken}` },
             signal: AbortSignal.timeout(10_000),
           },
         );
+        logger.info({ status: res.status }, '[railway-egress] slack conversations.list completed');
         const result = (await res.json()) as {
           channels?: Array<{ id: string; name: string; is_member: boolean }>;
           response_metadata?: { next_cursor?: string };

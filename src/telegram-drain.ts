@@ -29,10 +29,13 @@ export async function drainPendingTelegramMessages(
   const signature = createHmac('sha256', secret).update(agentId).digest('hex');
 
   try {
-    const res = await fetch(`${cloudUrl}/api/telegram/pending/${agentId}`, {
+    const url = `${cloudUrl}/api/telegram/pending/${agentId}`;
+    logger.info({ urlHost: new URL(url).host }, '[railway-egress] telegram-drain fetch sending');
+    const res = await fetch(url, {
       headers: { 'x-event-signature': signature },
       signal: AbortSignal.timeout(10_000),
     });
+    logger.info({ status: res.status }, '[railway-egress] telegram-drain fetch completed');
 
     if (!res.ok) {
       logger.warn({ status: res.status }, 'telegram-drain: fetch returned non-200');
