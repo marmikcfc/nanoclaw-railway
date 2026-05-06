@@ -36,6 +36,7 @@ let resolvedTenantId: string = ''; // set during init() from secrets or env
 let resolvedAgentName: string = 'unknown'; // cached before sanitize hook wipes ASSISTANT_NAME
 let currentTraceId: string | null = null;
 let currentTaskId: string | null = null; // set from TASK_ID env at init()
+let currentTurnId: string | null = null;
 let currentRootEventId: string | null = null;
 let seqCounter = 0;
 let agentChannel: string = 'unknown';
@@ -50,6 +51,7 @@ export interface TelemetryConfig {
   groupFolder: string;
   chatJid: string;
   assistantName?: string;
+  turnId?: string;
   dbPath: string;
 }
 
@@ -94,6 +96,7 @@ export async function init(config: TelemetryConfig): Promise<void> {
   const tenantId = config.secrets.TENANT_ID || process.env.TENANT_ID;
   resolvedTenantId = tenantId || '';
   currentTaskId = config.secrets.TASK_ID || process.env.TASK_ID || null;
+  currentTurnId = config.turnId || config.secrets.TURN_ID || process.env.TURN_ID || null;
   resolvedAgentName = config.secrets.ASSISTANT_NAME || resolvedAgentName;
   if (cloudUrl && eventSecret && tenantId && db) {
     cloudRelay.init({ db, cloudUrl, eventSecret, tenantId });
@@ -175,6 +178,7 @@ export function onQueryStart(prompt: string, sessionId?: string): void {
   const queryStartEvent: AgentEvent = {
     id: currentTraceId,
     agent_id: resolvedTenantId,
+    turn_id: currentTurnId,
     trace_id: currentTraceId,
     parent_event_id: null,
     seq: seqCounter++,
@@ -203,6 +207,7 @@ export function emitUserMessage(text: string): void {
   const event: AgentEvent = {
     id: eventId,
     agent_id: resolvedTenantId,
+    turn_id: currentTurnId,
     trace_id: currentTraceId,
     parent_event_id: currentRootEventId,
     seq: seqCounter++,
@@ -320,6 +325,7 @@ function handleAssistant(message: Record<string, unknown>): void {
       const reasoningEvent: AgentEvent = {
         id: randomUUID(),
         agent_id: resolvedTenantId,
+        turn_id: currentTurnId,
         trace_id: currentTraceId || '',
         parent_event_id: currentRootEventId,
         seq: seqCounter++,
@@ -371,6 +377,7 @@ function handleAssistant(message: Record<string, unknown>): void {
       const toolCloudEvent: AgentEvent = {
         id: toolCloudId,
         agent_id: resolvedTenantId,
+        turn_id: currentTurnId,
         trace_id: currentTraceId || '',
         parent_event_id: currentRootEventId,
         seq: seqCounter++,
@@ -420,6 +427,7 @@ function handleToolResult(message: Record<string, unknown>): void {
   const toolResultEvent: AgentEvent = {
     id: randomUUID(),
     agent_id: resolvedTenantId,
+    turn_id: currentTurnId,
     trace_id: currentTraceId || '',
     parent_event_id: toolCallCloudId || currentRootEventId,
     seq: seqCounter++,
@@ -469,6 +477,7 @@ function handleSubagentStart(message: Record<string, unknown>): void {
   const subStartEvent: AgentEvent = {
     id: subStartCloudId,
     agent_id: resolvedTenantId,
+    turn_id: currentTurnId,
     trace_id: currentTraceId || '',
     parent_event_id: currentRootEventId,
     seq: seqCounter++,
@@ -530,6 +539,7 @@ function handleSubagentEnd(message: Record<string, unknown>): void {
   const subEndEvent: AgentEvent = {
     id: randomUUID(),
     agent_id: resolvedTenantId,
+    turn_id: currentTurnId,
     trace_id: currentTraceId || '',
     parent_event_id: subStartCloudIdForEnd || currentRootEventId,
     seq: seqCounter++,
@@ -604,6 +614,7 @@ function handleResult(message: Record<string, unknown>): void {
   const resultEvent: AgentEvent = {
     id: randomUUID(),
     agent_id: resolvedTenantId,
+    turn_id: currentTurnId,
     trace_id: currentTraceId || '',
     parent_event_id: currentRootEventId,
     seq: seqCounter++,
@@ -636,6 +647,7 @@ function handleResult(message: Record<string, unknown>): void {
     const completeEvent: AgentEvent = {
       id: currentRootEventId,
       agent_id: resolvedTenantId,
+      turn_id: currentTurnId,
       trace_id: currentTraceId || '',
       parent_event_id: null,
       seq: 0,
@@ -739,6 +751,7 @@ export function logPendingApiCalls(dataCostsPath: string): void {
         const event: AgentEvent = {
           id: eventId,
           agent_id: resolvedTenantId,
+          turn_id: currentTurnId,
           trace_id: currentTraceId,
           parent_event_id: currentRootEventId,
           seq: seqCounter++,

@@ -181,6 +181,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  turnId?: string;
   secrets?: Record<string, string>;
 }
 
@@ -814,6 +815,7 @@ Never attempt to call WebSearch or WebFetch — they are not allowed and will er
             AGENT_ID: process.env.AGENT_ID || '',
             WORKSPACE_ID: process.env.WORKSPACE_ID || '',
             TASK_ID: process.env.TASK_ID || '',
+            TURN_ID: process.env.TURN_ID || '',
             RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN || '',
           },
         },
@@ -967,6 +969,7 @@ async function main(): Promise<void> {
       groupFolder: containerInput.groupFolder,
       chatJid: containerInput.chatJid,
       assistantName: containerInput.assistantName,
+      turnId: containerInput.turnId,
       dbPath: path.join(process.env.PEPPER_WORKSPACE_GROUP || '/workspace/group', 'agent_events.db'),
     });
 

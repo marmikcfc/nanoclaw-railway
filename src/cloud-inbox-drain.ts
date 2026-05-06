@@ -86,16 +86,16 @@ async function processInboxEvent(event: CloudInboxEvent): Promise<void> {
   }
 
   if (event.railway_command === 'telegram-incoming') {
-    const payload = event.payload as { update?: unknown };
+    const payload = event.payload as { update?: unknown; turn_id?: string };
     if (!payload.update) throw new Error('Inbox telegram event missing update');
-    await processTelegramIncomingUpdate(payload.update);
+    await processTelegramIncomingUpdate(payload.update, payload.turn_id);
     return;
   }
 
   if (event.railway_command === 'slack-incoming') {
-    const payload = event.payload as { event?: unknown; team_id?: string };
+    const payload = event.payload as { event?: unknown; team_id?: string; turn_id?: string };
     if (!payload.event) throw new Error('Inbox slack event missing event payload');
-    await processSlackIncomingEvent(payload.event, payload.team_id);
+    await processSlackIncomingEvent(payload.event, payload.team_id, payload.turn_id);
     return;
   }
 

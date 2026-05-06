@@ -52,6 +52,7 @@ export interface ContainerInput {
   channel?: string;
   origin?: string; // 'chat' | 'dashboard'
   taskId?: string; // set by railway-runner after task creation
+  turnId?: string;
 }
 
 export interface ContainerOutput {

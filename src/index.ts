@@ -208,6 +208,7 @@ async function emitUserMessagesToCloud(
   chatJid: string,
   messages: NewMessage[],
   taskId: string,
+  turnId?: string | null,
 ): Promise<void> {
   const cloudUrl = process.env.PEPPER_CLOUD_URL;
   const agentId = process.env.AGENT_ID;
@@ -225,6 +226,7 @@ async function emitUserMessagesToCloud(
     agent_name: ASSISTANT_NAME,
     channel: 'telegram',
     task_id: taskId,
+    turn_id: turnId ?? null,
     data: { text: msg.content, sender: msg.sender_name ?? msg.sender ?? 'User' },
     tokens_used: null,
     cost_usd: null,
@@ -241,6 +243,27 @@ async function emitUserMessagesToCloud(
     body,
     signal: AbortSignal.timeout(10_000),
   });
+}
+
+async function markTurnComplete(turnId: string | null | undefined, assistantText: string): Promise<void> {
+  const cloudUrl = process.env.PEPPER_CLOUD_URL;
+  const agentId = process.env.AGENT_ID;
+  const secret = process.env.PEPPER_EVENT_SECRET;
+  if (!cloudUrl || !agentId || !secret || !turnId) return;
+
+  const body = JSON.stringify({ assistant_text: assistantText });
+  const sig = crypto.createHmac('sha256', secret).update(body).digest('hex');
+
+  const res = await fetch(`${cloudUrl}/api/agents/${agentId}/turns/${turnId}/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-event-signature': sig },
+    body,
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`turn complete failed: HTTP ${res.status}`);
+  }
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -341,12 +364,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       })()
     : null;
 
+  const webchatTurnId = channel.ownsJid('admin@pepper')
+    ? (() => {
+        const wc = channel as WebchatChannel;
+        const ids = wc.incomingTurnIds.splice(0);
+        return ids.length > 0 ? ids[ids.length - 1] : null;
+      })()
+    : null;
+
+  const channelTurnId = !channel.ownsJid('admin@pepper') && 'consumeTurnId' in channel
+    ? (channel as Channel & { consumeTurnId(jid: string): string | null }).consumeTurnId(chatJid)
+    : null;
+  const effectiveTurnId = webchatTurnId ?? channelTurnId;
+
   if (channel.ownsJid('admin@pepper')) {
     logger.info(
       {
         chatJid,
         webchatTraceId,
         webchatTaskId,
+        webchatTurnId,
+        channelTurnId,
+        effectiveTurnId,
       },
       'Webchat processing context resolved',
     );
@@ -381,7 +420,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     });
     if (telegramTaskId) {
       const userMessages = missedMessages.filter(m => !m.is_from_me);
-      emitUserMessagesToCloud(chatJid, userMessages, telegramTaskId).catch(err =>
+      emitUserMessagesToCloud(chatJid, userMessages, telegramTaskId, effectiveTurnId).catch(err =>
         logger.warn({ err, chatJid }, 'Failed to emit telegram user messages to cloud'),
       );
     }
@@ -492,7 +531,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const effectiveTaskId = telegramTaskId ?? webchatTaskId;
   if (channel.ownsJid('admin@pepper')) { runningWebchatTaskId = webchatTaskId; webchatAgentIdle = false; }
-  const output = await runAgent(group, prompt, chatJid, attachments.length ? attachments : undefined, effectiveTaskId, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, attachments.length ? attachments : undefined, effectiveTaskId, effectiveTurnId, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -517,8 +556,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (channel.ownsJid('admin@pepper')) {
           (channel as WebchatChannel).currentTraceId = webchatTraceId;
           (channel as WebchatChannel).currentTaskId = webchatTaskId;
+          (channel as WebchatChannel).currentTurnId = effectiveTurnId;
         }
         await channel.sendMessage(chatJid, text);
+        markTurnComplete(effectiveTurnId, text).catch(err =>
+          logger.warn({ err, chatJid, turnId: effectiveTurnId }, 'Failed to mark turn complete in cloud'),
+        );
         logger.info({ group: group.name, chatJid, textLength: text.length }, 'Response sent to user');
         outputSentToUser = true;
         // Persist last response for long-gap context recovery (first 800 chars)
@@ -550,6 +593,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       chatJid,
       effectiveTaskId,
       webchatTraceId,
+      webchatTurnId,
+      channelTurnId,
+      effectiveTurnId,
       output,
       hadError,
       outputSentToUser,
@@ -592,6 +638,7 @@ async function runAgent(
   chatJid: string,
   attachments?: import('./media.js').ProcessedAttachment[],
   taskId?: string | null,
+  turnId?: string | null,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const sessionId = sessions[group.folder];
@@ -644,6 +691,7 @@ async function runAgent(
         chatJid,
         assistantName: ASSISTANT_NAME,
         ...(taskId ? { taskId } : {}),
+        ...(turnId ? { turnId } : {}),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -822,6 +870,17 @@ async function startMessageLoop(): Promise<void> {
               }
               continue; // leave cursor as-is; message stays in SQLite for next spawn
             }
+          }
+
+          if (chatJid === 'admin@pepper') {
+            if (webchatAgentIdle) {
+              logger.info({ chatJid }, 'Webchat message queued as a new turn — closing idle agent');
+              queue.closeStdin(chatJid);
+            } else if (runningWebchatTaskId !== null) {
+              logger.info({ chatJid }, 'Webchat message queued as a new turn — waiting for current run');
+            }
+            queue.enqueueMessageCheck(chatJid);
+            continue;
           }
 
           if (queue.sendMessage(chatJid, formatted + attachmentSuffix)) {

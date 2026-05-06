@@ -27,6 +27,7 @@ export class TelegramChannel implements Channel {
   private botToken: string;
   // Track active thread per chat: chatId → message_id to reply to
   private activeThread = new Map<string, number>();
+  private pendingTurnIds = new Map<string, string[]>();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -388,6 +389,20 @@ export class TelegramChannel implements Channel {
     } catch (err) {
       logger.error({ jid, filename, err }, 'Failed to send Telegram file');
     }
+  }
+
+  setIncomingTurnId(jid: string, turnId: string): void {
+    const queue = this.pendingTurnIds.get(jid) ?? [];
+    queue.push(turnId);
+    this.pendingTurnIds.set(jid, queue);
+  }
+
+  consumeTurnId(jid: string): string | null {
+    const queue = this.pendingTurnIds.get(jid);
+    if (!queue || queue.length === 0) return null;
+    const turnId = queue.shift() ?? null;
+    if (queue.length === 0) this.pendingTurnIds.delete(jid);
+    return turnId;
   }
 
   private async uploadToCloud(buffer: Buffer, filename: string, mimeType: string): Promise<void> {

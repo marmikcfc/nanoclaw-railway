@@ -20,6 +20,7 @@ export class WebchatChannel implements Channel {
    * drains the queue and uses the last entry as webchatTaskId for this run.
    */
   incomingTaskIds: (string | null)[] = [];
+  incomingTurnIds: (string | null)[] = [];
   /**
    * Set by processGroupMessages just before calling sendMessage; read
    * synchronously by sendMessage before its first await so no webhook
@@ -28,6 +29,7 @@ export class WebchatChannel implements Channel {
   currentTraceId: string | null = null;
   /** Real task UUID set before each sendMessage — always a valid UUID or null. */
   currentTaskId: string | null = null;
+  currentTurnId: string | null = null;
 
   ownsJid(jid: string): boolean {
     return jid === WEBCHAT_JID;
@@ -53,6 +55,7 @@ export class WebchatChannel implements Channel {
     const event = {
       id: randomUUID(),
       agent_id: agentId,
+      turn_id: this.currentTurnId ?? undefined,
       trace_id: this.currentTraceId ?? randomUUID(),
       parent_event_id: null,
       seq: 1,

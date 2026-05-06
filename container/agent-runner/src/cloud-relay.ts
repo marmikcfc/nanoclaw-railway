@@ -33,6 +33,7 @@ export function init(config: CloudRelayConfig): void {
   // Ensure cloud sync columns exist (safe to re-run)
   try { db.exec(`ALTER TABLE agent_events ADD COLUMN cloud_id TEXT;`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE agent_events ADD COLUMN trace_id TEXT;`); } catch { /* already exists */ }
+  try { db.exec(`ALTER TABLE agent_events ADD COLUMN turn_id TEXT;`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE agent_events ADD COLUMN parent_event_id TEXT;`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE agent_events ADD COLUMN seq INTEGER;`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE agent_events ADD COLUMN synced INTEGER DEFAULT 0;`); } catch { /* already exists */ }
@@ -61,9 +62,9 @@ export function push(event: AgentEvent, sqliteRowId?: number): void {
   if (db && sqliteRowId) {
     try {
       db.prepare(
-        `UPDATE agent_events SET cloud_id = ?, trace_id = ?, parent_event_id = ?, seq = ?, synced = 0
+        `UPDATE agent_events SET cloud_id = ?, trace_id = ?, turn_id = ?, parent_event_id = ?, seq = ?, synced = 0
          WHERE id = ?`
-      ).run(event.id, event.trace_id, event.parent_event_id, event.seq, sqliteRowId);
+      ).run(event.id, event.trace_id, event.turn_id ?? null, event.parent_event_id, event.seq, sqliteRowId);
     } catch (err) {
       log(`SQLite cloud fields update error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -136,7 +137,7 @@ function flushUnsyncedFromDb(): void {
     const rows = db.prepare(
       `SELECT cloud_id, trace_id, event_type, data, session_id, tool_name,
               input_tokens, output_tokens, cost_usd, duration_ms, timestamp,
-              parent_event_id, seq, task_id
+              parent_event_id, seq, task_id, turn_id
        FROM agent_events WHERE synced = 0 AND cloud_id IS NOT NULL
        ORDER BY id ASC LIMIT 100`
     ).all() as Array<Record<string, unknown>>;
@@ -148,6 +149,7 @@ function flushUnsyncedFromDb(): void {
       buffer.push({
         id: row.cloud_id as string,
         agent_id: tenantId,
+        turn_id: (row.turn_id as string) || null,
         trace_id: row.trace_id as string,
         parent_event_id: (row.parent_event_id as string) || null,
         seq: (row.seq as number) || 0,

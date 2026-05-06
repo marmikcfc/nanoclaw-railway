@@ -44,6 +44,7 @@ export type EventData =
 export interface AgentEvent {
   id: string;
   agent_id: string;
+  turn_id?: string | null;
   trace_id: string;
   parent_event_id: string | null;
   seq: number;

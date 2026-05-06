@@ -283,6 +283,7 @@ export async function runRailwayAgent(
         RAILWAY_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT || '',
         // Cloud task context for artifact uploader
         TASK_ID: taskId || '',
+        TURN_ID: input.turnId || '',
         AGENT_ID: agentId,
         WORKSPACE_ID: process.env.WORKSPACE_ID || '',
         PEPPER_CLOUD_URL: cloudUrl,
@@ -324,6 +325,7 @@ export async function runRailwayAgent(
       ...(eventSecret && { PEPPER_EVENT_SECRET: eventSecret }),
       ...(agentId && { TENANT_ID: agentId }),
       ...(taskId && { TASK_ID: taskId }),
+      ...(input.turnId && { TURN_ID: input.turnId }),
       ...(ASSISTANT_NAME && { ASSISTANT_NAME }),
       ...(process.env.COMPOSIO_API_KEY && { COMPOSIO_API_KEY: process.env.COMPOSIO_API_KEY }),
     };

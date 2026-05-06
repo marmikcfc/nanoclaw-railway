@@ -163,16 +163,18 @@ export async function processWebhookEvent(body: unknown): Promise<void> {
 
   // Webchat path: bypass groupEntries lookup, store directly to admin@pepper
   if (integrationId === 'webchat') {
-    const { content, traceId, task_id, attachments: rawAttachments } = (payload as {
+    const { content, traceId, task_id, turn_id, attachments: rawAttachments } = (payload as {
       content?: string;
       traceId: string;
       task_id?: string;
+      turn_id?: string;
       attachments?: { url: string; mimeType: string; filename?: string }[];
     });
     logger.info(
       {
         traceId,
         taskId: task_id ?? null,
+        turnId: turn_id ?? null,
         contentLength: content?.length ?? 0,
         attachmentCount: rawAttachments?.length ?? 0,
       },
@@ -232,22 +234,25 @@ export async function processWebhookEvent(body: unknown): Promise<void> {
     if (channel) {
       channel.incomingTraceIds.push(traceId);
       channel.incomingTaskIds.push(task_id ?? null);
+      channel.incomingTurnIds.push(turn_id ?? null);
       logger.info(
         {
           traceId,
           taskId: task_id ?? null,
+          turnId: turn_id ?? null,
           queuedTraceIds: channel.incomingTraceIds.length,
           queuedTaskIds: channel.incomingTaskIds.length,
+          queuedTurnIds: channel.incomingTurnIds.length,
         },
         'Webchat webhook queued for group processing',
       );
     } else {
-      logger.warn({ traceId, taskId: task_id ?? null }, 'Webchat webhook had no channel instance');
+      logger.warn({ traceId, taskId: task_id ?? null, turnId: turn_id ?? null }, 'Webchat webhook had no channel instance');
     }
 
     if (_enqueueWebchat) {
       _enqueueWebchat('admin@pepper');
-      logger.info({ traceId, taskId: task_id ?? null }, 'Webchat group enqueue requested');
+      logger.info({ traceId, taskId: task_id ?? null, turnId: turn_id ?? null }, 'Webchat group enqueue requested');
     } else {
       logger.warn({ traceId, taskId: task_id ?? null }, 'Webchat enqueue function missing');
     }
@@ -535,6 +540,7 @@ export async function processWakeTask(body: unknown): Promise<void> {
   if (channel) {
     channel.incomingTraceIds.push(randomUUID());
     channel.incomingTaskIds.push(task_id);
+    channel.incomingTurnIds.push((body as { turn_id?: string })?.turn_id ?? null);
   }
 
   _enqueueWebchat?.('admin@pepper');
@@ -550,7 +556,7 @@ async function handleWakeTask(body: unknown, res: http.ServerResponse): Promise<
   json(res, 200, { ok: true });
 }
 
-export async function processSlackIncomingEvent(event: unknown, teamId?: string): Promise<void> {
+export async function processSlackIncomingEvent(event: unknown, teamId?: string, turnId?: string): Promise<void> {
   const slackChannel = connectedChannels.find(
     (ch) => ch.name === 'slack' && 'handleSlackEvent' in ch,
   ) as (Channel & { handleSlackEvent(e: unknown, t?: string): Promise<void> }) | undefined;
@@ -559,18 +565,24 @@ export async function processSlackIncomingEvent(event: unknown, teamId?: string)
     throw new Error('Slack channel not connected');
   }
 
+  const channelId = (event as { channel?: string })?.channel;
+  if (turnId && channelId && 'setIncomingTurnId' in slackChannel) {
+    (slackChannel as Channel & { setIncomingTurnId(jid: string, turnId: string): void })
+      .setIncomingTurnId(`slack:${channelId}`, turnId);
+  }
+
   await slackChannel.handleSlackEvent(event, teamId);
 }
 
 async function handleSlackIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
-  const { event, team_id } = body as { event?: unknown; team_id?: string };
+  const { event, team_id, turn_id } = body as { event?: unknown; team_id?: string; turn_id?: string };
   if (!event) {
     json(res, 400, { error: 'Missing event' });
     return;
   }
 
   try {
-    await processSlackIncomingEvent(event, team_id);
+    await processSlackIncomingEvent(event, team_id, turn_id);
     json(res, 200, { ok: true });
   } catch (err) {
     logger.error({ err: err instanceof Error ? err.stack : err }, 'Slack handleSlackEvent failed');
@@ -578,7 +590,7 @@ async function handleSlackIncoming(body: unknown, res: http.ServerResponse): Pro
   }
 }
 
-export async function processTelegramIncomingUpdate(update: unknown): Promise<void> {
+export async function processTelegramIncomingUpdate(update: unknown, turnId?: string): Promise<void> {
   const upd = update as { message?: { chat?: { id: number }; text?: string; message_id?: number } };
   logger.info({ chatId: upd.message?.chat?.id, text: upd.message?.text?.slice(0, 60), msgId: upd.message?.message_id }, '[tg-incoming] update parsed');
 
@@ -593,13 +605,19 @@ export async function processTelegramIncomingUpdate(update: unknown): Promise<vo
     throw new Error('Telegram channel not connected');
   }
 
+  const chatId = upd.message?.chat?.id;
+  if (turnId && chatId != null && 'setIncomingTurnId' in tgChannel) {
+    (tgChannel as Channel & { setIncomingTurnId(jid: string, turnId: string): void })
+      .setIncomingTurnId(`tg:${chatId}`, turnId);
+  }
+
   logger.info('[tg-incoming] dispatching handleUpdate');
   await tgChannel.handleUpdate(update);
   logger.info('[tg-incoming] handleUpdate completed');
 }
 
 async function handleTelegramIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
-  const { update } = body as { update?: unknown };
+  const { update, turn_id } = body as { update?: unknown; turn_id?: string };
   logger.info({ has_update: !!update }, '[tg-incoming] received from Vercel gateway');
   if (!update) {
     logger.warn('[tg-incoming] missing update field in body');
@@ -608,7 +626,7 @@ async function handleTelegramIncoming(body: unknown, res: http.ServerResponse): 
   }
 
   try {
-    await processTelegramIncomingUpdate(update);
+    await processTelegramIncomingUpdate(update, turn_id);
     json(res, 200, { ok: true });
   } catch (err) {
     logger.error({ err: err instanceof Error ? err.stack : err, update: JSON.stringify(update).slice(0, 200) }, '[tg-incoming] handleUpdate FAILED');

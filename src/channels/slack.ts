@@ -32,6 +32,7 @@ export class SlackChannel implements Channel {
   private connected = false;
   private userNameCache = new Map<string, string>();
   private activeThread = new Map<string, string>();
+  private pendingTurnIds = new Map<string, string[]>();
   private opts: {
     onMessage: OnInboundMessage;
     onChatMetadata: OnChatMetadata;
@@ -170,6 +171,20 @@ export class SlackChannel implements Channel {
   }
 
   async setTyping(_jid: string, _isTyping: boolean): Promise<void> {}
+
+  setIncomingTurnId(jid: string, turnId: string): void {
+    const queue = this.pendingTurnIds.get(jid) ?? [];
+    queue.push(turnId);
+    this.pendingTurnIds.set(jid, queue);
+  }
+
+  consumeTurnId(jid: string): string | null {
+    const queue = this.pendingTurnIds.get(jid);
+    if (!queue || queue.length === 0) return null;
+    const turnId = queue.shift() ?? null;
+    if (queue.length === 0) this.pendingTurnIds.delete(jid);
+    return turnId;
+  }
 
   async syncGroups(_force?: boolean): Promise<void> {
     try {
