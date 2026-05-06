@@ -285,6 +285,32 @@ async function handleWebhookEvent(body: unknown, res: http.ServerResponse): Prom
   json(res, 200, { ok: true });
 }
 
+async function handleDrainInbox(body: unknown, res: http.ServerResponse): Promise<void> {
+  const payload = (body as { event_id?: string; reason?: string }) || {};
+  logger.info(
+    {
+      eventId: payload.event_id ?? null,
+      reason: payload.reason ?? null,
+    },
+    '[railway<-cloud] drain-inbox requested',
+  );
+
+  json(res, 202, { accepted: true, draining: true });
+
+  import('./cloud-inbox-drain.js')
+    .then(({ drainCloudInboxEvents }) => drainCloudInboxEvents())
+    .catch((err) => {
+      logger.error(
+        {
+          eventId: payload.event_id ?? null,
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        },
+        '[railway<-cloud] drain-inbox failed',
+      );
+    });
+}
+
 async function handleAllowNumber(body: unknown, res: http.ServerResponse): Promise<void> {
   const payload = body as Record<string, unknown>;
   const phone = payload?.phone;
@@ -677,6 +703,7 @@ const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse)
   'enable-integration': handleEnableIntegration,
   'disable-integration': handleDisableIntegration,
   'webhook-event': handleWebhookEvent,
+  'drain-inbox': handleDrainInbox,
   'allow-number': handleAllowNumber,
   'remove-number': handleRemoveNumber,
   'send-file': handleSendFile,
