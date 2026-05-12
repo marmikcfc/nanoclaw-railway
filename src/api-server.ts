@@ -7,8 +7,18 @@ import { logger } from './logger.js';
 import { GROUPS_DIR } from './config.js';
 import { downloadBuffer, processImage, processPdf } from './media.js';
 import { Channel } from './types.js';
-import { storeMessage, getAllRegisteredGroups, deleteSession, clearTaskContextCache } from './db.js';
+import {
+  deleteTask,
+  getAllRegisteredGroups,
+  getAllTasks,
+  getTaskById,
+  storeMessage,
+  updateTask,
+  deleteSession,
+  clearTaskContextCache,
+} from './db.js';
 import { enableIntegration, disableIntegration } from './integrations/activator.js';
+import { reportScheduleHint, reportScheduleMirror } from './task-scheduler.js';
 
 // Lazily resolved to avoid circular import at module load time
 let _addAllowedNumber: ((phone: string) => void) | undefined;
@@ -401,6 +411,68 @@ async function handleCronTick(_body: unknown, res: http.ServerResponse): Promise
   });
 }
 
+function runtimeScheduleId(body: unknown): string | null {
+  const id = (body as { runtime_schedule_id?: string })?.runtime_schedule_id;
+  return id || null;
+}
+
+async function handleListScheduledTasks(_body: unknown, res: http.ServerResponse): Promise<void> {
+  json(res, 200, { tasks: getAllTasks() });
+}
+
+async function handlePauseScheduledTask(body: unknown, res: http.ServerResponse): Promise<void> {
+  const taskId = runtimeScheduleId(body);
+  if (!taskId) {
+    json(res, 400, { error: 'runtime_schedule_id required' });
+    return;
+  }
+  const task = getTaskById(taskId);
+  if (!task) {
+    json(res, 404, { error: 'Scheduled task not found' });
+    return;
+  }
+  updateTask(taskId, { status: 'paused' });
+  const updatedTask = getTaskById(taskId)!;
+  void reportScheduleMirror('pause', updatedTask);
+  void reportScheduleHint();
+  json(res, 200, { ok: true, task: updatedTask });
+}
+
+async function handleResumeScheduledTask(body: unknown, res: http.ServerResponse): Promise<void> {
+  const taskId = runtimeScheduleId(body);
+  if (!taskId) {
+    json(res, 400, { error: 'runtime_schedule_id required' });
+    return;
+  }
+  const task = getTaskById(taskId);
+  if (!task) {
+    json(res, 404, { error: 'Scheduled task not found' });
+    return;
+  }
+  updateTask(taskId, { status: 'active' });
+  const updatedTask = getTaskById(taskId)!;
+  void reportScheduleMirror('resume', updatedTask);
+  void reportScheduleHint();
+  json(res, 200, { ok: true, task: updatedTask });
+}
+
+async function handleCancelScheduledTask(body: unknown, res: http.ServerResponse): Promise<void> {
+  const taskId = runtimeScheduleId(body);
+  if (!taskId) {
+    json(res, 400, { error: 'runtime_schedule_id required' });
+    return;
+  }
+  const task = getTaskById(taskId);
+  if (!task) {
+    json(res, 404, { error: 'Scheduled task not found' });
+    return;
+  }
+  void reportScheduleMirror('cancel', task, 'cancelled');
+  deleteTask(taskId);
+  void reportScheduleHint();
+  json(res, 200, { ok: true, task: { ...task, status: 'cancelled', next_run: null } });
+}
+
 async function handleResetSession(body: unknown, res: http.ServerResponse): Promise<void> {
   const { groupFolder } = (body as { groupFolder?: string }) || {};
   const folder = groupFolder || 'webchat';
@@ -726,6 +798,10 @@ const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse)
   'remove-number': handleRemoveNumber,
   'send-file': handleSendFile,
   'cron-tick': handleCronTick,
+  'list-scheduled-tasks': handleListScheduledTasks,
+  'pause-scheduled-task': handlePauseScheduledTask,
+  'resume-scheduled-task': handleResumeScheduledTask,
+  'cancel-scheduled-task': handleCancelScheduledTask,
   'reset-session': handleResetSession,
   'telegram-incoming': handleTelegramIncoming,
   'slack-incoming': handleSlackIncoming,

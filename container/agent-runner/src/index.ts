@@ -694,23 +694,6 @@ async function runQuery(
     }
   }
 
-  // ── Composio MCP tool servers (remote HTTP, managed by Pepper Cloud) ──
-  const composioMcpUrls: Record<string, string> = process.env.COMPOSIO_MCP_URLS
-    ? (() => { try { return JSON.parse(process.env.COMPOSIO_MCP_URLS); } catch { return {}; } })()
-    : {};
-  const composioMcpServers: Record<string, { type: string; url: string; headers: Record<string, string> }> = {};
-  const composioToolPatterns: string[] = [];
-
-  for (const [app, url] of Object.entries(composioMcpUrls)) {
-    composioMcpServers[app] = {
-      type: 'http',
-      url,
-      headers: { 'x-api-key': sdkEnv.COMPOSIO_API_KEY || '' },
-    };
-    composioToolPatterns.push(`mcp__${app}__*`);
-    log(`[composio] MCP server: ${app}`);
-  }
-
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
   let globalClaudeMd: string | undefined;
@@ -794,7 +777,6 @@ Never attempt to call WebSearch or WebFetch — they are not allowed and will er
         'NotebookEdit',
         'mcp__pepper__*',
         ...extraMcpToolPatterns,
-        ...composioToolPatterns,
       ],
       env: sdkEnv,
       ...(canUseTool
@@ -820,7 +802,6 @@ Never attempt to call WebSearch or WebFetch — they are not allowed and will er
           },
         },
         ...extraMcpServers,
-        ...composioMcpServers,
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

@@ -12,7 +12,7 @@ import {
   listSkills,
   removeSkill,
 } from './skill-installer.js';
-import { reportScheduleHint } from './task-scheduler.js';
+import { reportScheduleHint, reportScheduleMirror } from './task-scheduler.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -338,6 +338,8 @@ export async function processTaskIpc(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
+        const createdTask = getTaskById(taskId);
+        if (createdTask) void reportScheduleMirror('upsert', createdTask);
         void reportScheduleHint();
       }
       break;
@@ -347,6 +349,8 @@ export async function processTaskIpc(
         const task = getTaskById(data.taskId);
         if (task && task.group_folder === sourceGroup) {
           updateTask(data.taskId, { status: 'paused' });
+          const updatedTask = getTaskById(data.taskId);
+          if (updatedTask) void reportScheduleMirror('pause', updatedTask);
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
@@ -366,6 +370,8 @@ export async function processTaskIpc(
         const task = getTaskById(data.taskId);
         if (task && task.group_folder === sourceGroup) {
           updateTask(data.taskId, { status: 'active' });
+          const updatedTask = getTaskById(data.taskId);
+          if (updatedTask) void reportScheduleMirror('resume', updatedTask);
           logger.info(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
@@ -384,6 +390,7 @@ export async function processTaskIpc(
       if (data.taskId) {
         const task = getTaskById(data.taskId);
         if (task && task.group_folder === sourceGroup) {
+          void reportScheduleMirror('cancel', task, 'cancelled');
           deleteTask(data.taskId);
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -451,11 +458,29 @@ export async function processTaskIpc(
             const ms = parseInt(updatedTask.schedule_value, 10);
             if (!isNaN(ms) && ms > 0) {
               updates.next_run = new Date(Date.now() + ms).toISOString();
+            } else {
+              logger.warn(
+                { taskId: data.taskId, value: updatedTask.schedule_value },
+                'Invalid interval in task update',
+              );
+              break;
             }
+          } else if (updatedTask.schedule_type === 'once') {
+            const date = new Date(updatedTask.schedule_value);
+            if (isNaN(date.getTime())) {
+              logger.warn(
+                { taskId: data.taskId, value: updatedTask.schedule_value },
+                'Invalid timestamp in task update',
+              );
+              break;
+            }
+            updates.next_run = date.toISOString();
           }
         }
 
         updateTask(data.taskId, updates);
+        const updatedTask = getTaskById(data.taskId);
+        if (updatedTask) void reportScheduleMirror('upsert', updatedTask);
         logger.info(
           { taskId: data.taskId, sourceGroup, updates },
           'Task updated via IPC',

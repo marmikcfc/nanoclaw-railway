@@ -114,6 +114,59 @@ export async function reportScheduleHint(): Promise<void> {
   }
 }
 
+export async function reportScheduleMirror(
+  action: 'upsert' | 'run' | 'pause' | 'resume' | 'cancel',
+  task: ScheduledTask,
+  statusOverride?: 'active' | 'paused' | 'completed' | 'cancelled',
+): Promise<void> {
+  const cloudUrl = process.env.PEPPER_CLOUD_URL;
+  const agentId = process.env.AGENT_ID;
+  const wsId = process.env.WORKSPACE_ID;
+  const secret = process.env.PEPPER_EVENT_SECRET;
+
+  if (!cloudUrl || !agentId || !wsId || !secret) return;
+
+  const body = JSON.stringify({
+    action,
+    runtime_schedule_id: task.id,
+    prompt: task.prompt,
+    schedule_type: task.schedule_type,
+    schedule_value: task.schedule_value,
+    schedule_status: statusOverride ?? task.status,
+    next_run_at: task.next_run,
+    last_run_at: task.last_run,
+    last_result: task.last_result,
+    chat_jid: task.chat_jid,
+  });
+  const signature = createHmac('sha256', secret).update(body).digest('hex');
+
+  try {
+    const res = await fetch(
+      `${cloudUrl}/api/workspaces/${wsId}/agents/${agentId}/monitors/mirror`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-event-signature': signature,
+        },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) {
+      logger.warn(
+        { agentId, taskId: task.id, action, status: res.status },
+        'reportScheduleMirror: non-OK response from cloud',
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { err, agentId, taskId: task.id, action },
+      'reportScheduleMirror: failed to report schedule mirror',
+    );
+  }
+}
+
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
@@ -285,6 +338,8 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+  const updatedTask = getTaskById(task.id);
+  if (updatedTask) void reportScheduleMirror('run', updatedTask);
   void reportScheduleHint();
 }
 
