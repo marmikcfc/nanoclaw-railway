@@ -1,116 +1,139 @@
 #!/usr/bin/env bash
-# x-search — Twitter/X search via xAI Grok Responses API
-# Uses curl + jq against api.x.ai/v1/responses with x_search tool.
-# Requires: XAI_API_KEY
+# x-search — Twitter/X recent-tweet search via Composio (TWITTER_RECENT_SEARCH).
+# Wraps `composio-tool execute` and reshapes the response into a flat tweet list.
+# Requires: COMPOSIO_API_KEY, COMPOSIO_USER_ID (auto-injected in the agent container)
 
 set -euo pipefail
 
-API="https://api.x.ai/v1/responses"
-
 die() { echo "error: $*" >&2; exit 1; }
 
-[ -z "${XAI_API_KEY:-}" ] && die "XAI_API_KEY not set"
-
-auth=(-H "Authorization: Bearer $XAI_API_KEY" -H "Content-Type: application/json")
-
-# Build the x_search tool JSON with optional parameters
-build_tool_json() {
-  local handles_include="${1:-}" handles_exclude="${2:-}" from_date="${3:-}" to_date="${4:-}"
-  local tool='{"type":"x_search"'
-
-  if [ -n "$handles_include" ]; then
-    local arr
-    arr=$(echo "$handles_include" | jq -R 'split(",") | map(select(. != ""))')
-    tool="$tool,\"allowed_x_handles\":$arr"
-  fi
-  if [ -n "$handles_exclude" ]; then
-    local arr
-    arr=$(echo "$handles_exclude" | jq -R 'split(",") | map(select(. != ""))')
-    tool="$tool,\"excluded_x_handles\":$arr"
-  fi
-  if [ -n "$from_date" ]; then
-    tool="$tool,\"from_date\":\"$from_date\""
-  fi
-  if [ -n "$to_date" ]; then
-    tool="$tool,\"to_date\":\"$to_date\""
-  fi
-
-  tool="$tool}"
-  echo "$tool"
-}
-
-# ── query ─────────────────────────────────────────────────────────
 cmd_query() {
   local query="" handles="" exclude="" from_date="" to_date=""
+  local max_results="30" since_id=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --handles)  handles="$2"; shift 2 ;;
-      --exclude)  exclude="$2"; shift 2 ;;
-      --from)     from_date="$2"; shift 2 ;;
-      --to)       to_date="$2"; shift 2 ;;
-      *) query="$1"; shift ;;
+      --handles)     handles="$2"; shift 2 ;;
+      --exclude)     exclude="$2"; shift 2 ;;
+      --from)        from_date="$2"; shift 2 ;;
+      --to)          to_date="$2"; shift 2 ;;
+      --max-results) max_results="$2"; shift 2 ;;
+      --since-id)    since_id="$2"; shift 2 ;;
+      *)             query="$1"; shift ;;
     esac
   done
-  [ -z "$query" ] && die "usage: x-search query \"search terms\" [--handles user1,user2] [--exclude bot1] [--from 2026-04-01] [--to 2026-04-05]"
+  [ -z "$query" ] && die "usage: x-search query \"<X v2 query>\" [--handles u1,u2] [--exclude b1,b2] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--max-results N] [--since-id <id>]"
 
-  local tool_json
-  tool_json=$(build_tool_json "$handles" "$exclude" "$from_date" "$to_date")
+  if [ -n "$handles" ]; then
+    local h_or
+    h_or=$(echo "$handles" | tr ',' '\n' | sed '/^$/d; s/^/from:/' | paste -sd '|' - | sed 's/|/ OR /g')
+    query="$query ($h_or)"
+  fi
+  if [ -n "$exclude" ]; then
+    local e_clauses
+    e_clauses=$(echo "$exclude" | tr ',' '\n' | sed '/^$/d; s/^/-from:/' | paste -sd ' ' -)
+    query="$query $e_clauses"
+  fi
 
-  local body
-  body=$(jq -n \
-    --arg model "grok-3-mini" \
-    --arg query "$query" \
-    --argjson tool "$tool_json" \
-    '{model: $model, tools: [$tool], input: $query}')
+  local args
+  args=$(jq -n \
+    --arg q "$query" \
+    --argjson max "$max_results" \
+    --arg si "$since_id" \
+    --arg st "$from_date" \
+    --arg et "$to_date" \
+    '{
+      query: $q,
+      max_results: $max,
+      expansions: ["author_id"],
+      tweet__fields: ["created_at", "public_metrics", "lang"],
+      user__fields: ["username", "name", "verified", "public_metrics"]
+    }
+    + (if $si != "" then {since_id: $si} else {} end)
+    + (if $st != "" then {start_time: ($st + "T00:00:00Z")} else {} end)
+    + (if $et != "" then {end_time: ($et + "T23:59:59Z")} else {} end)')
 
-  local response
-  response=$(curl -s -X POST "$API" "${auth[@]}" -d "$body") || die "HTTP request failed"
+  local resp
+  resp=$(composio-tool execute TWITTER_RECENT_SEARCH "$args")
 
-  # Extract text output and citations
-  echo "$response" | jq '{
-    text: [.output[] | select(.type == "text") | .text] | join("\n"),
-    citations: [.output[] | select(.type == "text") | .annotations[]? | select(.type == "url_citation") | {title, url}]
-  }'
+  # Fail loudly on Composio-side errors. Two error shapes observed:
+  #   { "error": { "message": ..., "code": ... } }              (auth/404, no .successful)
+  #   { "successful": false, "error": {...}, "data": null }     (tool-level failure)
+  # Without this guard, both shapes flow through the reshape as
+  # {result_count: 0, tweets: []} and look identical to "no recent matches".
+  local err_check
+  err_check=$(echo "$resp" | jq -r '
+    if (.error != null and (.error | type) == "object" and (.error | length) > 0)
+       or (.successful == false)
+    then "fail" else "ok" end')
+  if [ "$err_check" = "fail" ]; then
+    echo "$resp" | jq '{successful, error}' >&2
+    die "composio TWITTER_RECENT_SEARCH failed (see error above)"
+  fi
+
+  echo "$resp" | jq '
+    .data as $d
+    | ($d.includes.users // [] | map({key: .id, value: .}) | from_entries) as $umap
+    | {
+        result_count: ($d.meta.result_count // 0),
+        newest_id: $d.meta.newest_id,
+        oldest_id: $d.meta.oldest_id,
+        tweets: ($d.data // [] | map(
+          $umap[.author_id] as $u
+          | {
+              id: .id,
+              author: ($u.username // null),
+              author_name: ($u.name // null),
+              followers: ($u.public_metrics.followers_count // null),
+              verified: ($u.verified // null),
+              text: .text,
+              link: ("https://x.com/" + ($u.username // "i") + "/status/" + .id),
+              created_at: .created_at,
+              likes: .public_metrics.like_count,
+              retweets: .public_metrics.retweet_count,
+              replies: .public_metrics.reply_count
+            }
+        ))
+      }'
 }
 
-# ── user ──────────────────────────────────────────────────────────
-cmd_user() {
-  local username="${1:-}"
-  [ -z "$username" ] && die "usage: x-search user <username>"
-
-  cmd_query "Tell me about X user @$username — their recent posts, bio, and activity"
-}
-
-# ── thread ────────────────────────────────────────────────────────
-cmd_thread() {
-  local url="${1:-}"
-  [ -z "$url" ] && die "usage: x-search thread <tweet-url>"
-
-  cmd_query "Fetch and summarize this tweet thread: $url"
-}
-
-# ── main ──────────────────────────────────────────────────────────
 case "${1:-}" in
   query)   shift; cmd_query "$@" ;;
-  user)    shift; cmd_user "$@" ;;
-  thread)  shift; cmd_thread "$@" ;;
+  user)
+    die "x-search user is no longer supported. Use:
+  composio-tool execute TWITTER_USER_LOOKUP_BY_USERNAME '{\"username\":\"<handle>\"}'"
+    ;;
+  thread)
+    die "x-search thread is no longer supported. Use:
+  composio-tool execute TWITTER_POST_LOOKUP_BY_POST_ID '{\"id\":\"<tweet_id>\"}'"
+    ;;
   *)
     cat <<'USAGE'
-x-search — Twitter/X search via Grok
+x-search — Twitter/X recent-tweet search via Composio TWITTER_RECENT_SEARCH
 
 Commands:
-  query   "search terms" [--handles h1,h2] [--exclude e1] [--from DATE] [--to DATE]
-  user    <username>                    Look up a user's profile and recent activity
-  thread  <tweet-url>                   Fetch and summarize a tweet thread
+  query "<X v2 query>" [options]    Search recent tweets (last 7 days)
 
 Options:
-  --handles   Comma-separated X handles to restrict results to (max 10)
-  --exclude   Comma-separated X handles to exclude (max 10)
-  --from      Start date (ISO8601, e.g. 2026-04-01)
-  --to        End date (ISO8601, e.g. 2026-04-05)
+  --handles u1,u2        Add (from:u1 OR from:u2) to the query
+  --exclude b1,b2        Add -from:b1 -from:b2 to the query
+  --from YYYY-MM-DD      start_time (UTC midnight)
+  --to   YYYY-MM-DD      end_time (UTC midnight)
+  --max-results N        1-100 (default 30)
+  --since-id <id>        Return only tweets newer than this ID (dedup helper)
+
+X v2 query operators: "exact phrase", OR (caps), space=AND, -exclude,
+  is:retweet, is:reply, has:links, lang:en, from:user, etc.
+
+Examples:
+  x-search query '("just launched" OR "now live") -is:retweet lang:en'
+  x-search query "AI agents" --handles elonmusk,sama
+  x-search query "@myhandle" --since-id 1234567890 --max-results 100
+
+Output: JSON {result_count, newest_id, oldest_id, tweets:[{author,link,text,likes,...}]}
 
 Environment:
-  XAI_API_KEY   (required) xAI API key
+  COMPOSIO_API_KEY   (required) auto-injected in agent containers
+  COMPOSIO_USER_ID   (required) workspace's Composio entity ID
 USAGE
     exit 1
     ;;
