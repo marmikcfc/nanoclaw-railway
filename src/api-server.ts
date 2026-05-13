@@ -698,12 +698,13 @@ async function handleEmailIncoming(body: unknown, res: http.ServerResponse): Pro
     email_id?: string;
   };
 
-  if (!p.from || !p.subject || !p.message_id) {
-    json(res, 400, { error: 'Missing required fields: from, subject, message_id' });
+  if (!p.from || !p.message_id) {
+    json(res, 400, { error: 'Missing required fields: from, message_id' });
     return;
   }
 
-  const content = `[email from ${p.from}]\nSubject: ${p.subject}\n\n${p.body ?? ''}`;
+  const subject = p.subject ?? '';
+  const content = `[email from ${p.from}]\nSubject: ${subject}\n\n${p.body ?? ''}`;
 
   try {
     storeMessage({
@@ -726,7 +727,7 @@ async function handleEmailIncoming(body: unknown, res: http.ServerResponse): Pro
 
     _enqueueWebchat?.('admin@pepper');
 
-    logger.info({ from: p.from, subject: p.subject, message_id: p.message_id }, 'email-incoming stored and enqueued');
+    logger.info({ from: p.from, subject, message_id: p.message_id }, 'email-incoming stored and enqueued');
     json(res, 200, { ok: true });
   } catch (err) {
     logger.error({ err: err instanceof Error ? err.stack : err }, 'email-incoming handler failed');

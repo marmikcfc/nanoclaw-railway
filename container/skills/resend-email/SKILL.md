@@ -49,22 +49,13 @@ Optional:
 Example invocation (pseudocode):
 
 ```
-composio run RESEND_SEND_EMAIL \
-  --from "$AGENT_EMAIL_FROM" \
-  --to "user@example.com" \
-  --subject "Quick update" \
-  --text "Hi! Here is the status..."
+composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["user@example.com"],"subject":"Quick update","text":"Hi! Here is the status..."}'
 ```
 
 To thread a reply:
 
 ```
-composio run RESEND_SEND_EMAIL \
-  --from "$AGENT_EMAIL_FROM" \
-  --to "$INBOUND_FROM" \
-  --subject "Re: $INBOUND_SUBJECT" \
-  --text "Thanks for the note..." \
-  --headers '{"In-Reply-To":"<inbound-message-id>"}'
+composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["'"$INBOUND_FROM"'"],"subject":"Re: '"$INBOUND_SUBJECT"'","text":"Thanks for the note...","headers":{"In-Reply-To":"<inbound-message-id>"}}'
 ```
 
 ---
@@ -82,11 +73,7 @@ composio run RESEND_SEND_EMAIL \
 **Daily summary email to the workspace owner:**
 
 ```
-composio run RESEND_SEND_EMAIL \
-  --from "$AGENT_EMAIL_FROM" \
-  --to "$WORKSPACE_OWNER_EMAIL" \
-  --subject "$(date +%Y-%m-%d) — Daily summary" \
-  --text "Today I..."
+composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["'"$WORKSPACE_OWNER_EMAIL"'"],"subject":"'"$(date +%Y-%m-%d)"' — Daily summary","text":"Today I..."}'
 ```
 
 **Acknowledge an inbound and follow up async:**
