@@ -688,6 +688,52 @@ export async function processTelegramIncomingUpdate(update: unknown, turnId?: st
   logger.info('[tg-incoming] handleUpdate completed');
 }
 
+async function handleEmailIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
+  const p = body as {
+    type?: string;
+    from?: string;
+    subject?: string;
+    body?: string;
+    message_id?: string;
+    email_id?: string;
+  };
+
+  if (!p.from || !p.subject || !p.message_id) {
+    json(res, 400, { error: 'Missing required fields: from, subject, message_id' });
+    return;
+  }
+
+  const content = `[email from ${p.from}]\nSubject: ${p.subject}\n\n${p.body ?? ''}`;
+
+  try {
+    storeMessage({
+      id: randomUUID(),
+      chat_jid: 'admin@pepper',
+      sender: `email:${p.from}`,
+      sender_name: p.from,
+      content,
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+      is_bot_message: false,
+    });
+
+    const channel = _getWebchatChannel?.();
+    if (channel) {
+      channel.incomingTraceIds.push(randomUUID());
+      channel.incomingTaskIds.push(null);
+      channel.incomingTurnIds.push(null);
+    }
+
+    _enqueueWebchat?.('admin@pepper');
+
+    logger.info({ from: p.from, subject: p.subject, message_id: p.message_id }, 'email-incoming stored and enqueued');
+    json(res, 200, { ok: true });
+  } catch (err) {
+    logger.error({ err: err instanceof Error ? err.stack : err }, 'email-incoming handler failed');
+    json(res, 503, { error: err instanceof Error ? err.message : 'Email handling failed' });
+  }
+}
+
 async function handleTelegramIncoming(body: unknown, res: http.ServerResponse): Promise<void> {
   const { update, turn_id } = body as { update?: unknown; turn_id?: string };
   logger.info({ has_update: !!update }, '[tg-incoming] received from Vercel gateway');
@@ -803,6 +849,7 @@ const ALLOWED_COMMANDS: Record<string, (body: unknown, res: http.ServerResponse)
   'resume-scheduled-task': handleResumeScheduledTask,
   'cancel-scheduled-task': handleCancelScheduledTask,
   'reset-session': handleResetSession,
+  'email-incoming': handleEmailIncoming,
   'telegram-incoming': handleTelegramIncoming,
   'slack-incoming': handleSlackIncoming,
   'stop-query': handleStopQuery,
