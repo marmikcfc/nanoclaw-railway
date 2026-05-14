@@ -380,6 +380,11 @@ const CLI_PASSTHROUGH_VARS = new Set([
   // Skill-injected platform API keys (used by curl in skill instructions)
   'EXA_API_KEY',             // market-analysis skill (Exa search)
   'XAI_API_KEY',             // x-search skill (Grok/X search)
+  // Agent identity metadata — non-secret. Without these, the sanitize hook
+  // unsets the agent's own email address from every Bash subprocess, which
+  // breaks self-diagnostics and any skill that composes From/Reply-To via shell.
+  'AGENT_EMAIL_FROM',
+  'AGENT_EMAIL_PROVIDER',
   // Observability (non-secret metadata — agents may use for self-diagnostics)
   'LANGFUSE_PUBLIC_KEY',
   'LANGFUSE_BASE_URL',
