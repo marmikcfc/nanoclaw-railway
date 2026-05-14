@@ -699,8 +699,8 @@ async function handleEmailIncoming(body: unknown, res: http.ServerResponse): Pro
     email_id?: string;
   };
 
-  if (!p.from || !p.subject || !p.message_id) {
-    json(res, 400, { error: 'Missing required fields: from, subject, message_id' });
+  if (!p.from || !p.message_id) {
+    json(res, 400, { error: 'Missing required fields: from, message_id' });
     return;
   }
 
@@ -718,7 +718,7 @@ async function handleEmailIncoming(body: unknown, res: http.ServerResponse): Pro
       type: 'email',
       email_row_id: p.email_row_id ?? null,
       from: p.from,
-      subject: p.subject,
+      subject: p.subject ?? '',
       body: p.body ?? '',
       message_id: p.message_id,
       email_id: p.email_id ?? '',
