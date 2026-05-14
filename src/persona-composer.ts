@@ -1,10 +1,10 @@
 // Persona composer — fetches per-agent soul.md + agents.md and workspace
-// users.md from the cloud, composes them into a final CLAUDE.md, and writes
-// to the per-group CLAUDE.md path.
+// users.md + voice.md from the cloud, composes them into a final CLAUDE.md,
+// and writes to the per-group CLAUDE.md path.
 //
 // Plan: docs/superpowers/plans/2026-05-01-persona-files.md
 //
-// Composition order: soul → agents → users → DEFAULT_RUNTIME_INSTRUCTIONS.
+// Composition order: soul → agents → users → voice → DEFAULT_RUNTIME_INSTRUCTIONS.
 // Empty/missing files are skipped — sensible defaults baked into the runtime
 // (the static template at groups/<folder>/CLAUDE.md) handle that case.
 
@@ -20,14 +20,16 @@ interface PersonaResponse {
   soul_md: string | null;
   agents_md: string | null;
   users_md: string | null;
+  voice_md: string | null;
   persona_updated_at: string | null;
   users_md_updated_at: string | null;
+  voice_md_updated_at: string | null;
 }
 
 export interface ComposedPersona {
   finalClaudeMd: string;
   composedAt: string;
-  sources: { soul: boolean; agents: boolean; users: boolean };
+  sources: { soul: boolean; agents: boolean; users: boolean; voice: boolean };
 }
 
 /**
@@ -72,7 +74,7 @@ export async function composePersona(opts: {
   sections.push(`# ${name}`);
   if (data.role) sections.push(`Role: ${data.role}`);
 
-  const sources = { soul: false, agents: false, users: false };
+  const sources = { soul: false, agents: false, users: false, voice: false };
   if (data.soul_md && data.soul_md.trim()) {
     sections.push('\n## Identity\n' + data.soul_md.trim());
     sources.soul = true;
@@ -84,6 +86,13 @@ export async function composePersona(opts: {
   if (data.users_md && data.users_md.trim()) {
     sections.push('\n## Who I serve\n' + data.users_md.trim());
     sources.users = true;
+  }
+  if (data.voice_md && data.voice_md.trim()) {
+    // voice.md captures the founder's writing style — agents draft tweets,
+    // LinkedIn posts, emails, and replies that match these patterns. Pair with
+    // the humanizer skill (final-pass) to scrub residual AI tells.
+    sections.push('\n## How I write\n' + data.voice_md.trim());
+    sources.voice = true;
   }
 
   return {
@@ -107,7 +116,7 @@ export async function syncPersonaToClaudeMd(opts: {
 }): Promise<boolean> {
   const composed = await composePersona(opts);
   if (!composed) return false;
-  if (!composed.sources.soul && !composed.sources.agents && !composed.sources.users) {
+  if (!composed.sources.soul && !composed.sources.agents && !composed.sources.users && !composed.sources.voice) {
     // Nothing meaningful to compose — leave the static template alone.
     return false;
   }
