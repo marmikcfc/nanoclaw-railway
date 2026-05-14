@@ -6,6 +6,7 @@ import {
   NewMessage,
 } from '../types.js';
 import { randomUUID } from 'crypto';
+import { registerChannel, ChannelOpts } from './registry.js';
 
 export interface EmailChannelOpts {
   onMessage: OnInboundMessage;
@@ -124,3 +125,11 @@ function extractName(rfc5322: string): string | undefined {
   if (!match) return undefined;
   return match[1].trim().replace(/^["']|["']$/g, '') || undefined;
 }
+
+registerChannel('email', (opts: ChannelOpts) => {
+  if (!process.env.AGENT_EMAIL_FROM) {
+    logger.info('[email-channel] AGENT_EMAIL_FROM not set — channel disabled');
+    return null;
+  }
+  return new EmailChannel(opts);
+});

@@ -4,6 +4,9 @@
 // discord
 import './discord.js';
 
+// email
+import './email.js';
+
 // gmail
 import './gmail.js';
 

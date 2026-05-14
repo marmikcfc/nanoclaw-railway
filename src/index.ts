@@ -1054,6 +1054,7 @@ async function main(): Promise<void> {
         if (chatJid.startsWith('slack:')) prefix = 'slack';
         else if (chatJid.startsWith('tg:')) prefix = 'tg';
         else if (chatJid.startsWith('dc:')) prefix = 'dc';
+        else if (chatJid.startsWith('email:')) prefix = 'email';
         else if (
           chatJid.includes('@g.us') ||
           chatJid.includes('@s.whatsapp.net')
@@ -1066,7 +1067,9 @@ async function main(): Promise<void> {
             .replace(/[^a-zA-Z0-9-]/g, '-')
             .toLowerCase()
             .slice(0, 50);
-          const chatIsDM = inferIsDM(chatJid);
+          // Email JIDs are always DMs — each inbound email is a task for the agent.
+          // inferIsDM doesn't know about email: format, so we special-case it.
+          const chatIsDM = prefix === 'email' ? true : inferIsDM(chatJid);
 
           registerGroup(chatJid, {
             name: chatName,
