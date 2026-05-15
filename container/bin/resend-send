@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# resend-send — send email through Pepper's platform Resend key.
+# Input is a JSON object matching the common Resend fields:
+#   {"to":["user@example.com"],"subject":"Hi","text":"Body"}
+
+set -euo pipefail
+
+die() { echo "error: $*" >&2; exit 1; }
+
+[ -z "${RESEND_API_KEY:-}" ] && die "RESEND_API_KEY not set"
+[ -z "${AGENT_EMAIL_FROM:-}" ] && die "AGENT_EMAIL_FROM not set"
+
+args="${1:-}"
+[ -z "$args" ] && die "usage: resend-send '{\"to\":[\"user@example.com\"],\"subject\":\"...\",\"text\":\"...\"}'"
+
+provider="${AGENT_EMAIL_PROVIDER:-platform}"
+case "$provider" in
+  platform|resend) ;;
+  composio|user)
+    die "AGENT_EMAIL_PROVIDER=$provider; use composio-tool execute RESEND_SEND_EMAIL for user-connected Resend"
+    ;;
+  *)
+    die "unsupported AGENT_EMAIL_PROVIDER=$provider"
+    ;;
+esac
+
+from=$(jq -nr \
+  --arg name "${ASSISTANT_NAME:-Agent}" \
+  --arg email "$AGENT_EMAIL_FROM" '
+  def trim: gsub("^\\s+|\\s+$"; "");
+  if ($email | test("<[^>]+>")) then
+    $email
+  else
+    ($name | trim | gsub("[\\r\\n\"]"; "")) as $display
+    | if $display == "" then $email else "\($display) <\($email)>" end
+  end
+')
+
+body=$(jq -c --arg from "$from" '
+  if (.to | type) != "array" then error("to must be an array") else . end
+  | if (.subject | type) != "string" then error("subject must be a string") else . end
+  | if (.text == null and .html == null) then error("text or html required") else . end
+  | .from = $from
+' <<<"$args") || die "invalid input JSON"
+
+response=$(curl -sS -X POST "https://api.resend.com/emails" \
+  -H "Authorization: Bearer $RESEND_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$body")
+
+if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
+  jq -r '.error | "error: \(.message // .name // "Resend send failed")"' <<<"$response" >&2
+  exit 1
+fi
+
+jq '.' <<<"$response"

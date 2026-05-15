@@ -69,12 +69,13 @@ RUN ARCH=$(dpkg --print-architecture) \
 # All tools are pure bash scripts — no compilation needed.
 # orth, exa, parallel, x-search, exa-search, composio-tool all live in container/bin/.
 COPY container/bin/composio-tool /usr/local/bin/composio-tool
+COPY container/bin/resend-send /usr/local/bin/resend-send
 COPY container/bin/x-search /usr/local/bin/x-search
 COPY container/bin/exa-search /usr/local/bin/exa-search
 COPY container/bin/exa /usr/local/bin/exa
 COPY container/bin/parallel /usr/local/bin/parallel
 COPY container/bin/orth /usr/local/bin/orth
-RUN chmod +x /usr/local/bin/composio-tool /usr/local/bin/x-search /usr/local/bin/exa-search \
+RUN chmod +x /usr/local/bin/composio-tool /usr/local/bin/resend-send /usr/local/bin/x-search /usr/local/bin/exa-search \
     /usr/local/bin/exa /usr/local/bin/parallel /usr/local/bin/orth
 
 # Set Chromium path for agent-browser

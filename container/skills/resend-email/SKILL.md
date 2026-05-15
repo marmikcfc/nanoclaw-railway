@@ -1,6 +1,6 @@
 ---
 name: resend-email
-description: Send and receive emails via Resend using the agent's assigned platform address. Use whenever the agent needs to email a human, reply to an inbound message, or batch-send notifications.
+description: Send and receive emails via Resend using either Pepper's platform address or a user-connected Resend account. Use whenever the agent needs to email a human, reply to an inbound message, or batch-send notifications.
 ---
 
 ## Credentials check
@@ -8,14 +8,22 @@ description: Send and receive emails via Resend using the agent's assigned platf
 If `AGENT_EMAIL_FROM` is not set, tell the user:
 > "I don't have an email address yet. Pick one in Settings → Agent email address on the Pepper dashboard."
 
-If `RESEND_API_KEY` is not set, tell the user:
+Read `AGENT_EMAIL_PROVIDER` before choosing a send path:
+- `platform` or `resend`: use Pepper's platform Resend key and the `resend-send` command.
+- `composio` or `user`: use the user's connected Resend account through Composio.
+
+If `AGENT_EMAIL_PROVIDER` is `platform` or `resend` and `RESEND_API_KEY` is not set, tell the user:
 > "Email sending is not configured on this Pepper deployment. Contact your workspace admin."
 
 ---
 
 ## Your email identity
 
-Your `From:` address is in the environment variable `AGENT_EMAIL_FROM`. It always looks like `<your-name>@mail.pepper.thestartupcompany.xyz`. **Always** use exactly this value as the `from` field on every send. Do not invent, modify, or substitute it — Resend will reject any send from an unverified address.
+Your sender address is in `AGENT_EMAIL_FROM`.
+
+For Pepper platform email (`AGENT_EMAIL_PROVIDER=platform` or `resend`), send as `ASSISTANT_NAME <AGENT_EMAIL_FROM>`. The `resend-send` command does this automatically, so pass only recipients, subject, and body.
+
+For user-connected Resend (`AGENT_EMAIL_PROVIDER=composio` or `user`), use the user-provided `AGENT_EMAIL_FROM` exactly as configured. It may already be a full sender identity such as `Agent Name <sender@domain.com>`.
 
 ---
 
@@ -28,16 +36,34 @@ Read the content carefully:
 - The `Subject:` line is the email subject.
 - Everything after the blank line is the body.
 
-Reply using the Composio Resend tool, threading via the inbound message's `Message-ID` when available (passed in the metadata).
+Reply using the send path selected by `AGENT_EMAIL_PROVIDER`, threading via the inbound message's `Message-ID` when available (passed in the metadata).
 
 ---
 
 ## Sending email
 
-You send mail through Composio's Resend integration. The tool slug is `RESEND_SEND_EMAIL`. Use your delegate or tool runner the same way you would for any other Composio tool.
+Check `AGENT_EMAIL_PROVIDER` first.
+
+### Platform Resend
+
+When `AGENT_EMAIL_PROVIDER` is `platform` or `resend`, use Pepper's platform key:
+
+```
+resend-send '{"to":["user@example.com"],"subject":"Quick update","text":"Hi! Here is the status..."}'
+```
+
+To thread a reply:
+
+```
+resend-send '{"to":["'"$INBOUND_FROM"'"],"subject":"Re: '"$INBOUND_SUBJECT"'","text":"Thanks for the note...","headers":{"In-Reply-To":"<inbound-message-id>"}}'
+```
+
+### User-connected Resend
+
+When `AGENT_EMAIL_PROVIDER` is `composio` or `user`, send through Composio's Resend integration. The tool slug is `RESEND_SEND_EMAIL`.
 
 Required arguments:
-- `from`: **always** `$AGENT_EMAIL_FROM` from the environment
+- `from`: `$AGENT_EMAIL_FROM` exactly as configured
 - `to`: array of recipient email addresses
 - `subject`: short subject line
 - `text` and/or `html`: body content (plain text is fine for most messages)
@@ -45,8 +71,6 @@ Required arguments:
 Optional:
 - `reply_to`: alternate reply-to address (rare)
 - `headers`: extra headers — to thread a reply, set `In-Reply-To` to the inbound `message_id`
-
-Example invocation (pseudocode):
 
 ```
 composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["user@example.com"],"subject":"Quick update","text":"Hi! Here is the status..."}'
@@ -62,7 +86,7 @@ composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["
 
 ## What you cannot do
 
-- You cannot send from any address other than `AGENT_EMAIL_FROM`. Resend rejects unverified senders.
+- You cannot send from an address outside the configured provider/domain. Resend rejects unverified senders.
 - You cannot create new inboxes. The platform domain is shared; new agent addresses are picked in the dashboard.
 - You cannot delete inbound mail. If a message was sent to your address it is in your record.
 
@@ -73,7 +97,7 @@ composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["
 **Daily summary email to the workspace owner:**
 
 ```
-composio-tool execute RESEND_SEND_EMAIL '{"from":"'"$AGENT_EMAIL_FROM"'","to":["'"$WORKSPACE_OWNER_EMAIL"'"],"subject":"'"$(date +%Y-%m-%d)"' — Daily summary","text":"Today I..."}'
+resend-send '{"to":["'"$WORKSPACE_OWNER_EMAIL"'"],"subject":"'"$(date +%Y-%m-%d)"' — Daily summary","text":"Today I..."}'
 ```
 
 **Acknowledge an inbound and follow up async:**
